@@ -1,0 +1,245 @@
+{% extends "base.html" %}
+{% block title %}Positions{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="flex items-center gap-8">
+    <div>
+      <h1>Positions</h1>
+      <p>Open positions across all bots — live LTP via yfinance</p>
+    </div>
+    <div class="ml-auto">
+      {% if not trading_enabled %}
+      <span class="tag tag-sim">SIMULATED ORDERS</span>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="card" id="section-hm">
+  <div class="card-header">
+    <span class="card-title">Hilega Milega <span id="hm-count" class="text-muted text-sm"></span></span>
+    <span class="text-muted text-sm" id="hm-pnl"></span>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Symbol</th><th>Sector</th><th>Qty</th><th>Entry</th>
+          <th>LTP</th><th>P&L%</th><th>Unrealised</th><th>Stop</th>
+          <th>Days</th><th>W/R</th><th>30d Chart</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="hm-body"><tr><td colspan="12" class="loading">Loading…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card" id="section-ts">
+  <div class="card-header">
+    <span class="card-title">Triple Screen Defense <span id="ts-count" class="text-muted text-sm"></span></span>
+    <span class="text-muted text-sm" id="ts-pnl"></span>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Symbol</th><th>Trigger</th><th>Qty</th><th>Entry</th>
+          <th>LTP</th><th>P&L%</th><th>Unrealised</th><th>Stop</th>
+          <th>Entry Date</th><th>W/R</th><th>30d Chart</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="ts-body"><tr><td colspan="12" class="loading">Loading…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card" id="section-nse">
+  <div class="card-header">
+    <span class="card-title">NSE200 Momentum <span id="nse-count" class="text-muted text-sm"></span></span>
+    <span class="text-muted text-sm" id="nse-pnl"></span>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Symbol</th><th>Momentum</th><th>Qty</th><th>Entry</th>
+          <th>LTP</th><th>P&L%</th><th>Unrealised</th><th>ML Wt</th>
+          <th>Date</th><th>W/R</th><th>30d Chart</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="nse-body"><tr><td colspan="12" class="loading">Loading…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+const sparkCharts = {};
+
+function makeSparklineCell(symbol) {
+  const id = 'spark-' + symbol.replace(/[^a-z0-9]/gi, '');
+  const cell = `<td class="sparkline-cell"><canvas id="${id}" width="100" height="36"></canvas></td>`;
+  setTimeout(() => loadSparkline(symbol, id), 200);
+  return cell;
+}
+
+async function loadSparkline(symbol, canvasId) {
+  const el = document.getElementById(canvasId);
+  if (!el) return;
+  try {
+    const data = await fetch('/api/sparkline/' + symbol).then(r=>r.json());
+    if (!data.length) return;
+    if (sparkCharts[canvasId]) sparkCharts[canvasId].destroy();
+    const ctx = el.getContext('2d');
+    const last = data[data.length-1];
+    const first = data[0];
+    const color = last >= first ? '#3fb950' : '#f85149';
+    sparkCharts[canvasId] = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: data.map((_,i)=>i),
+        datasets: [{data, borderColor: color, borderWidth: 1.5,
+                    pointRadius: 0, tension: 0.3,
+                    fill: true,
+                    backgroundColor: color + '18'}],
+      },
+      options: {animation:false, plugins:{legend:{display:false},tooltip:{enabled:false}},
+                scales:{x:{display:false},y:{display:false}},
+                elements:{line:{borderCapStyle:'round'}}},
+    });
+  } catch(e) {}
+}
+
+function renderHm(positions) {
+  const tbody = document.getElementById('hm-body');
+  const countEl = document.getElementById('hm-count');
+  const pnlEl   = document.getElementById('hm-pnl');
+  if (!positions.length) {
+    tbody.innerHTML = '<tr><td colspan="12" class="empty">No open positions</td></tr>';
+    countEl.textContent = '(0)';
+    return;
+  }
+  let totalPnl = 0;
+  tbody.innerHTML = positions.map(p => {
+    const pnl = p.pnl_rs || 0;
+    totalPnl += pnl;
+    const entryDate = p.entry_date || '—';
+    const daysSince = entryDate !== '—'
+      ? Math.floor((Date.now() - new Date(entryDate)) / 86400000) : '—';
+    return `<tr>
+      <td class="sym">${p.symbol||''}</td>
+      <td class="text-muted">${p.sector||'—'}</td>
+      <td class="mono">${p.qty||''}</td>
+      <td class="mono">₹${parseFloat(p.entry_px||0).toLocaleString('en-IN')}</td>
+      <td class="mono">${p.ltp ? '₹'+p.ltp.toLocaleString('en-IN') : '—'}</td>
+      <td class="mono ${clsPnl(p.pnl_pct||0)}">${fmtPct(p.pnl_pct)}</td>
+      <td class="mono ${clsPnl(pnl)}">${fmtRs(pnl)}</td>
+      <td class="mono text-muted">₹${parseFloat(p.stop_px||0).toLocaleString('en-IN')}</td>
+      <td class="mono">${daysSince}d</td>
+      <td class="wr-badge">${p.win_rate||'—'}</td>
+      ${makeSparklineCell(p.symbol||'')}
+      <td>
+        <div class="flex gap-8">
+          <button class="btn btn-sm btn-buy"  onclick="openModal('${p.symbol}','BUY',${p.qty})">BUY</button>
+          <button class="btn btn-sm btn-sell" onclick="openModal('${p.symbol}','SELL',${p.qty})">SELL</button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+  countEl.textContent = `(${positions.length})`;
+  pnlEl.textContent = 'Total unrealised: ' + fmtRs(totalPnl);
+  pnlEl.className = 'text-sm ' + clsPnl(totalPnl);
+}
+
+function renderTs(positions) {
+  const tbody = document.getElementById('ts-body');
+  const countEl = document.getElementById('ts-count');
+  const pnlEl   = document.getElementById('ts-pnl');
+  if (!positions.length) {
+    tbody.innerHTML = '<tr><td colspan="12" class="empty">No open positions</td></tr>';
+    countEl.textContent = '(0)';
+    return;
+  }
+  let totalPnl = 0;
+  tbody.innerHTML = positions.map(p => {
+    const pnl = p.pnl_rs || 0;
+    totalPnl += pnl;
+    return `<tr>
+      <td class="sym">${p.Symbol||''}</td>
+      <td class="text-muted">—</td>
+      <td class="mono">${p.Qty||''}</td>
+      <td class="mono">₹${parseFloat(p.BuyPrice||0).toLocaleString('en-IN')}</td>
+      <td class="mono">${p.ltp ? '₹'+p.ltp.toLocaleString('en-IN') : '—'}</td>
+      <td class="mono ${clsPnl(p.pnl_pct||0)}">${fmtPct(p.pnl_pct)}</td>
+      <td class="mono ${clsPnl(pnl)}">${fmtRs(pnl)}</td>
+      <td class="mono text-muted">₹${parseFloat(p.StopLoss||0).toLocaleString('en-IN')}</td>
+      <td class="mono">${p.EntryDate||'—'}</td>
+      <td class="wr-badge">${p.win_rate||'—'}</td>
+      ${makeSparklineCell(p.Symbol||'')}
+      <td>
+        <div class="flex gap-8">
+          <button class="btn btn-sm btn-buy"  onclick="openModal('${p.Symbol}','BUY',${p.Qty})">BUY</button>
+          <button class="btn btn-sm btn-sell" onclick="openModal('${p.Symbol}','SELL',${p.Qty})">SELL</button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+  countEl.textContent = `(${positions.length})`;
+  pnlEl.textContent = 'Total unrealised: ' + fmtRs(totalPnl);
+  pnlEl.className = 'text-sm ' + clsPnl(totalPnl);
+}
+
+function renderNse(positions) {
+  const tbody = document.getElementById('nse-body');
+  const countEl = document.getElementById('nse-count');
+  const pnlEl   = document.getElementById('nse-pnl');
+  if (!positions.length) {
+    tbody.innerHTML = '<tr><td colspan="12" class="empty">No active signals</td></tr>';
+    countEl.textContent = '(0)';
+    return;
+  }
+  let totalPnl = 0;
+  tbody.innerHTML = positions.map(p => {
+    const pnl = p.pnl_rs || 0;
+    totalPnl += pnl;
+    const mom = parseFloat(p.momentum_pct||0);
+    return `<tr>
+      <td class="sym">${p.ticker||''}</td>
+      <td class="mono ${clsPnl(mom)}">${mom>=0?'+':''}${mom.toFixed(1)}%</td>
+      <td class="mono">${p.qty||'—'}</td>
+      <td class="mono">₹${parseFloat(p.price||0).toLocaleString('en-IN')}</td>
+      <td class="mono">${p.ltp ? '₹'+p.ltp.toLocaleString('en-IN') : '—'}</td>
+      <td class="mono ${clsPnl(p.pnl_pct||0)}">${fmtPct(p.pnl_pct)}</td>
+      <td class="mono ${clsPnl(pnl)}">${fmtRs(pnl)}</td>
+      <td class="mono">${p.ml_weight||'—'}</td>
+      <td class="mono">${p.date||'—'}</td>
+      <td class="wr-badge">${p.win_rate||'—'}</td>
+      ${makeSparklineCell(p.ticker||'')}
+      <td>
+        <div class="flex gap-8">
+          <button class="btn btn-sm btn-buy"  onclick="openModal('${p.ticker}','BUY',${p.qty||1})">BUY</button>
+          <button class="btn btn-sm btn-sell" onclick="openModal('${p.ticker}','SELL',${p.qty||1})">SELL</button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+  countEl.textContent = `(${positions.length})`;
+  pnlEl.textContent = 'Total unrealised: ' + fmtRs(totalPnl);
+  pnlEl.className = 'text-sm ' + clsPnl(totalPnl);
+}
+
+async function loadPositions() {
+  try {
+    const d = await fetch('/api/positions').then(r=>r.json());
+    renderHm(d.hm  || []);
+    renderTs(d.ts  || []);
+    renderNse(d.nse || []);
+  } catch(e) {
+    console.error('Positions load error', e);
+  }
+}
+
+loadPositions();
+socket.on('prices_update', loadPositions);
+{% endblock %}

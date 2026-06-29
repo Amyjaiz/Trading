@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}Overview{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Overview</h1>
+  <p>Live portfolio summary — refreshes every 10 s</p>
+</div>
+
+<div class="kpi-row" id="kpi-row">
+  <div class="kpi-card">
+    <div class="kpi-label">Available Cash</div>
+    <div class="kpi-value accent" id="kpi-cash">—</div>
+    <div class="kpi-sub">Angel One rmsLimit</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Unrealised P&L</div>
+    <div class="kpi-value" id="kpi-unreal">—</div>
+    <div class="kpi-sub">All open positions</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Open Positions</div>
+    <div class="kpi-value accent" id="kpi-positions">—</div>
+    <div class="kpi-sub">Across 3 bots</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Bots Active</div>
+    <div class="kpi-value" id="kpi-bots">—</div>
+    <div class="kpi-sub">of 3 running</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Today Trades</div>
+    <div class="kpi-value accent" id="kpi-today">—</div>
+    <div class="kpi-sub">Buys + sells today</div>
+  </div>
+</div>
+
+<div class="bot-cards" id="bot-cards">
+  <div class="bot-card" id="bot-ts">
+    <div class="bot-header">
+      <span class="bot-name">Triple Screen</span>
+      <span class="status-dot offline" id="dot-ts"></span>
+    </div>
+    <div class="bot-lag" id="lag-ts">—</div>
+    <div class="bot-log" id="log-ts">loading…</div>
+  </div>
+  <div class="bot-card" id="bot-mom">
+    <div class="bot-header">
+      <span class="bot-name">NSE200 Momentum</span>
+      <span class="status-dot offline" id="dot-mom"></span>
+    </div>
+    <div class="bot-lag" id="lag-mom">—</div>
+    <div class="bot-log" id="log-mom">loading…</div>
+  </div>
+  <div class="bot-card" id="bot-hm">
+    <div class="bot-header">
+      <span class="bot-name">Hilega Milega</span>
+      <span class="status-dot offline" id="dot-hm"></span>
+    </div>
+    <div class="bot-lag" id="lag-hm">—</div>
+    <div class="bot-log" id="log-hm">loading…</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <span class="card-title">Today's Activity</span>
+    <span class="text-muted text-sm" id="today-date"></span>
+  </div>
+  <div class="table-wrap">
+    <table id="today-table">
+      <thead>
+        <tr>
+          <th>Bot</th><th>Time</th><th>Action</th><th>Symbol</th>
+          <th>Qty</th><th>Price</th><th>P&L</th>
+        </tr>
+      </thead>
+      <tbody id="today-body">
+        <tr><td colspan="7" class="empty">No trades today</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+document.getElementById('today-date').textContent = new Date().toLocaleDateString('en-IN', {weekday:'long',year:'numeric',month:'long',day:'numeric'});
+
+async function loadOverview() {
+  try {
+    const d = await fetch('/api/overview').then(r=>r.json());
+    const cash = d.available_cash;
+    document.getElementById('kpi-cash').textContent = cash != null ? '₹' + cash.toLocaleString('en-IN',{maximumFractionDigits:0}) : 'Unavailable';
+    const up = d.unrealised_pnl;
+    const upEl = document.getElementById('kpi-unreal');
+    upEl.textContent = fmtRs(up);
+    upEl.className = 'kpi-value ' + clsPnl(up);
+    document.getElementById('kpi-positions').textContent = d.open_positions;
+    const bots = d.bots || {};
+    const activeCount = Object.values(bots).filter(b=>b.status==='active').length;
+    document.getElementById('kpi-bots').textContent = activeCount + '/3';
+    document.getElementById('kpi-today').textContent = (d.today_trades||[]).length;
+
+    for (const [key, bot] of Object.entries(bots)) {
+      const dotEl = document.getElementById('dot-' + key);
+      const lagEl = document.getElementById('lag-' + key);
+      const logEl = document.getElementById('log-' + key);
+      if (!dotEl) continue;
+      dotEl.className = 'status-dot ' + bot.status;
+      const lag = bot.lag_s;
+      lagEl.textContent = lag != null ? `⟳ ${lag < 60 ? lag+'s' : Math.round(lag/60)+'m'} ago` : 'No log found';
+      logEl.textContent = (bot.last_lines || []).join('\n') || '—';
+    }
+
+    const tbody = document.getElementById('today-body');
+    const trades = d.today_trades || [];
+    if (trades.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" class="empty">No trades today</td></tr>';
+    } else {
+      tbody.innerHTML = trades.map(t => {
+        const pnl = parseFloat(t.pnl||0);
+        const bot = t._bot || '';
+        return `<tr>
+          <td><span class="tag tag-${bot.toLowerCase()}">${bot}</span></td>
+          <td class="mono text-muted">${(t.date||'') + ' ' + (t.time||'')}</td>
+          <td>${t.action||''}</td>
+          <td class="sym">${t.symbol||''}</td>
+          <td class="mono">${t.qty||''}</td>
+          <td class="mono">₹${parseFloat(t.price||0).toLocaleString('en-IN')}</td>
+          <td class="mono ${clsPnl(pnl)}">${pnl ? fmtRs(pnl) : '—'}</td>
+        </tr>`;
+      }).join('');
+    }
+  } catch(e) {
+    console.error('Overview load error', e);
+  }
+}
+
+loadOverview();
+setInterval(loadOverview, 30000);
+socket.on('prices_update', () => loadOverview());
+{% endblock %}

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Alive Gaming — Login</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="login-wrap">
+    <div class="login-card">
+      <div class="login-logo">
+        <h2>◈ Alive Gaming</h2>
+        <p>Algorithmic Trading Portal</p>
+      </div>
+      {% if error %}
+      <div class="login-error">{{ error }}</div>
+      {% endif %}
+      <form method="POST" action="/login">
+        <div class="form-field">
+          <label>Password</label>
+          <input type="password" name="password" autocomplete="current-password" required autofocus>
+        </div>
+        <div class="form-field">
+          <label>Google Authenticator Code</label>
+          <input type="text" name="totp" maxlength="6" placeholder="000000" inputmode="numeric" autocomplete="one-time-code" required>
+        </div>
+        <button type="submit" class="login-submit">Sign In</button>
+      </form>
+    </div>
+  </div>
+</body>
+</html>
