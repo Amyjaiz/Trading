@@ -1,0 +1,870 @@
+from __future__ import annotations
+
+import argparse
+import csv
+import io
+import json
+import os
+import subprocess
+import sys
+import time
+from datetime import datetime, timedelta
+from functools import wraps
+from threading import Lock, Thread
+
+import pyotp
+from flask import (Flask, Response, jsonify, redirect, render_template,
+                   request, send_file, session, url_for)
+from flask_socketio import SocketIO, disconnect, emit
+from werkzeug.security import check_password_hash, generate_password_hash
+
+# ──────────────────────────────────────────────────────────────
+# CONFIGURATION — update these paths for your Windows machine
+# ──────────────────────────────────────────────────────────────
+TRIPLE_SCREEN_DIR    = r"C:\Trade\triple_screen"
+NSE200_DIR           = r"C:\Trade\nse200"
+HM_DIR               = r"C:\Trade\hm"
+DASHBOARD_DIR        = os.path.dirname(os.path.abspath(__file__))
+
+AUTH_FILE            = os.path.join(DASHBOARD_DIR, "dashboard_auth.json")
+CUSTOM_UNIVERSE_FILE = os.path.join(DASHBOARD_DIR, "custom_universe.json")
+ORDER_LOG_FILE       = os.path.join(DASHBOARD_DIR, "order_log.csv")
+
+TRADING_ENABLED      = False       # flip to True to send live orders
+MAX_ORDER_VALUE      = 25_000      # hard cap per order in ₹
+
+# Angel One credentials (hardcoded per Aman's preference — fill these in)
+ANGEL_API_KEY        = "your_api_key"
+ANGEL_CLIENT_ID      = "your_client_id"
+ANGEL_PASSWORD       = "your_mpin"
+ANGEL_TOTP_SECRET    = "your_totp_seed"   # Angel One's own TOTP seed
+
+# ──────────────────────────────────────────────────────────────
+# Flask + SocketIO — threading mode only (no eventlet)
+# ──────────────────────────────────────────────────────────────
+app = Flask(__name__, template_folder="templates", static_folder="static")
+app.secret_key = os.urandom(32)   # sessions invalidated on restart (intentional)
+socketio = SocketIO(app, async_mode="threading", cors_allowed_origins="*")
+
+_backtest_proc: subprocess.Popen | None = None
+_backtest_lock = Lock()
+
+# ──────────────────────────────────────────────────────────────
+# Auth helpers
+# ──────────────────────────────────────────────────────────────
+def _load_auth() -> dict:
+    if not os.path.exists(AUTH_FILE):
+        return {}
+    with open(AUTH_FILE) as f:
+        return json.load(f)
+
+def _save_auth(data: dict) -> None:
+    with open(AUTH_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+def login_required(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not session.get("authenticated"):
+            return redirect(url_for("login_page"))
+        if time.time() - session.get("last_active", 0) > 1800:   # 30 min inactivity
+            session.clear()
+            return redirect(url_for("login_page"))
+        session["last_active"] = time.time()
+        return f(*args, **kwargs)
+    return wrapper
+
+def _verify_totp(code: str) -> bool:
+    auth = _load_auth()
+    secret = auth.get("totp_secret", "")
+    if not secret:
+        return False
+    return pyotp.TOTP(secret).verify(code, valid_window=1)
+
+# ──────────────────────────────────────────────────────────────
+# File readers
+# ──────────────────────────────────────────────────────────────
+def _read_json(path: str) -> dict | list:
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def _read_csv_dicts(path: str) -> list[dict]:
+    try:
+        with open(path, newline="", errors="replace") as f:
+            return list(csv.DictReader(f))
+    except Exception:
+        return []
+
+def _bot_log_tail(bot_dir: str, n: int = 50) -> tuple[list[str], float]:
+    log_path = os.path.join(bot_dir, "bot.log")
+    lines: list[str] = []
+    lag = float("inf")
+    try:
+        lag = time.time() - os.path.getmtime(log_path)
+        with open(log_path, errors="replace") as f:
+            all_lines = f.readlines()
+        lines = [ln.rstrip() for ln in all_lines[-n:]]
+    except Exception:
+        pass
+    return lines, lag
+
+# ──────────────────────────────────────────────────────────────
+# Bot state readers
+# ──────────────────────────────────────────────────────────────
+def read_hm_positions() -> list[dict]:
+    data = _read_json(os.path.join(HM_DIR, "positions.json"))
+    return list(data.values()) if isinstance(data, dict) else []
+
+def read_ts_positions() -> list[dict]:
+    return _read_csv_dicts(os.path.join(TRIPLE_SCREEN_DIR, "open_positions.csv"))
+
+def read_nse200_signals() -> list[dict]:
+    rows = _read_csv_dicts(os.path.join(NSE200_DIR, "nse200_signal_log.csv"))
+    seen: dict[str, dict] = {}
+    for row in reversed(rows):
+        sym = row.get("ticker", "")
+        if sym and sym not in seen:
+            seen[sym] = row
+    return list(seen.values())
+
+def read_custom_universe() -> dict:
+    default = {
+        "hm":            {"add": [], "remove": []},
+        "triple_screen": {"add": [], "remove": []},
+        "nse200":        {"extra": []},
+    }
+    if not os.path.exists(CUSTOM_UNIVERSE_FILE):
+        return default
+    try:
+        with open(CUSTOM_UNIVERSE_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+def write_custom_universe(data: dict) -> None:
+    with open(CUSTOM_UNIVERSE_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+# ──────────────────────────────────────────────────────────────
+# Market data
+# ──────────────────────────────────────────────────────────────
+def _get_ltps(symbols: list[str]) -> dict[str, float]:
+    if not symbols:
+        return {}
+    try:
+        import yfinance as yf
+        tickers = [s + ".NS" for s in symbols]
+        if len(tickers) == 1:
+            data = yf.download(tickers[0], period="1d", interval="1m",
+                               progress=False, auto_adjust=True)
+            close = data["Close"].dropna()
+            return {symbols[0]: round(float(close.iloc[-1]), 2)} if not close.empty else {}
+        data = yf.download(tickers, period="1d", interval="1m",
+                           progress=False, auto_adjust=True)
+        prices: dict[str, float] = {}
+        close = data["Close"]
+        for col in close.columns:
+            sym = str(col).replace(".NS", "")
+            series = close[col].dropna()
+            if not series.empty:
+                prices[sym] = round(float(series.iloc[-1]), 2)
+        return prices
+    except Exception:
+        return {}
+
+def _get_sparkline(symbol: str) -> list[float]:
+    try:
+        import yfinance as yf
+        df = yf.download(symbol + ".NS", period="30d", interval="1d",
+                         progress=False, auto_adjust=True)
+        return [round(float(x), 2) for x in df["Close"].dropna().tolist()]
+    except Exception:
+        return []
+
+# ──────────────────────────────────────────────────────────────
+# Angel One
+# ──────────────────────────────────────────────────────────────
+def _angel_login():
+    from SmartApi import SmartConnect
+    api = SmartConnect(api_key=ANGEL_API_KEY)
+    totp_code = pyotp.TOTP(ANGEL_TOTP_SECRET).now()
+    api.generateSession(ANGEL_CLIENT_ID, ANGEL_PASSWORD, totp_code)
+    return api
+
+def _get_angel_balance() -> float | None:
+    try:
+        api = _angel_login()
+        r = api.rmsLimit()
+        return float(r["data"]["availablecash"])
+    except Exception:
+        return None
+
+def _load_token_map() -> dict[str, str]:
+    for d in [HM_DIR, TRIPLE_SCREEN_DIR]:
+        path = os.path.join(d, "angel_tokens.json")
+        if os.path.exists(path):
+            try:
+                with open(path) as f:
+                    return json.load(f)
+            except Exception:
+                pass
+    return {}
+
+def _place_order(symbol: str, txn: str, qty: int) -> dict:
+    if not TRADING_ENABLED:
+        return {
+            "status": "simulated",
+            "symbol": symbol, "txn": txn, "qty": qty,
+            "message": "TRADING_ENABLED=False — order not sent to exchange",
+        }
+    token_map = _load_token_map()
+    token = token_map.get(symbol, "")
+    try:
+        api = _angel_login()
+        result = api.placeOrder({
+            "variety":         "NORMAL",
+            "tradingsymbol":   symbol + "-EQ",
+            "symboltoken":     token,
+            "transactiontype": txn,
+            "exchange":        "NSE",
+            "ordertype":       "MARKET",
+            "producttype":     "DELIVERY",
+            "duration":        "DAY",
+            "quantity":        str(qty),
+        })
+        return {"status": "ok", "data": result}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+# ──────────────────────────────────────────────────────────────
+# Trade analytics
+# ──────────────────────────────────────────────────────────────
+PERIOD_DAYS: dict[str, int | None] = {
+    "1w": 7, "1m": 30, "3m": 90, "6m": 180, "1y": 365, "all": None,
+}
+
+def _all_trades(bot_filter: str = "all", period_days: int | None = None) -> list[dict]:
+    sources = [
+        ("TS",  os.path.join(TRIPLE_SCREEN_DIR, "ts_trades.csv")),
+        ("MOM", os.path.join(NSE200_DIR,        "nse200_trades.csv")),
+        ("HM",  os.path.join(HM_DIR,            "hm_trades.csv")),
+    ]
+    cutoff = (datetime.now() - timedelta(days=period_days)).date() if period_days else None
+    trades: list[dict] = []
+    for tag, path in sources:
+        if bot_filter not in ("all", tag.lower()):
+            continue
+        for row in _read_csv_dicts(path):
+            if cutoff:
+                try:
+                    if datetime.strptime(row.get("date", ""), "%Y-%m-%d").date() < cutoff:
+                        continue
+                except Exception:
+                    pass
+            row["_bot"] = tag
+            trades.append(row)
+    return trades
+
+def _compute_analytics(trades: list[dict]) -> dict:
+    sells = [t for t in trades if t.get("action", "").upper() in ("SELL", "EXIT")]
+    if not sells:
+        return {"total_pnl": 0, "win_rate": 0, "total_trades": 0,
+                "profit_factor": 0, "avg_hold": 0,
+                "best_trade": {}, "worst_trade": {}}
+    pnls: list[float] = []
+    holds: list[int] = []
+    for t in sells:
+        try:
+            pnls.append(float(t.get("pnl", 0) or 0))
+        except Exception:
+            pnls.append(0.0)
+        try:
+            holds.append(int(t.get("held_days", 0) or 0))
+        except Exception:
+            pass
+    wins   = [p for p in pnls if p > 0]
+    losses = [p for p in pnls if p <= 0]
+    gross_profit = sum(wins)
+    gross_loss   = abs(sum(losses))
+
+    def safe_pct(row: dict) -> float:
+        try:
+            return float(row.get("pnl_pct", 0) or 0)
+        except Exception:
+            return 0.0
+
+    best  = max(sells, key=safe_pct, default={})
+    worst = min(sells, key=safe_pct, default={})
+    return {
+        "total_pnl":    round(sum(pnls), 2),
+        "win_rate":     round(100 * len(wins) / len(pnls), 1) if pnls else 0,
+        "total_trades": len(pnls),
+        "profit_factor": round(gross_profit / gross_loss, 2) if gross_loss else 0,
+        "avg_hold":     round(sum(holds) / len(holds), 1) if holds else 0,
+        "best_trade":  {"symbol": best.get("symbol"),  "pct": best.get("pnl_pct")},
+        "worst_trade": {"symbol": worst.get("symbol"), "pct": worst.get("pnl_pct")},
+    }
+
+def _win_rate_for_symbol(symbol: str) -> str:
+    wins = losses = 0
+    for path in [os.path.join(TRIPLE_SCREEN_DIR, "ts_trades.csv"),
+                 os.path.join(NSE200_DIR,        "nse200_trades.csv"),
+                 os.path.join(HM_DIR,            "hm_trades.csv")]:
+        for row in _read_csv_dicts(path):
+            if row.get("symbol") == symbol and row.get("action", "").upper() in ("SELL", "EXIT"):
+                if float(row.get("pnl", 0) or 0) > 0:
+                    wins += 1
+                else:
+                    losses += 1
+    total = wins + losses
+    if total == 0:
+        return "—"
+    return f"{wins}W/{losses}L = {round(100*wins/total)}%"
+
+# ──────────────────────────────────────────────────────────────
+# Background price push loop (every 10 s)
+# ──────────────────────────────────────────────────────────────
+def _price_push_loop() -> None:
+    while True:
+        try:
+            syms = list({
+                *(p.get("symbol", "") for p in read_hm_positions()),
+                *(p.get("Symbol", "") for p in read_ts_positions()),
+                *(p.get("ticker", "") for p in read_nse200_signals()),
+            } - {""})
+            if syms:
+                ltps = _get_ltps(syms)
+                socketio.emit("prices_update", ltps)
+        except Exception:
+            pass
+        time.sleep(10)
+
+# ──────────────────────────────────────────────────────────────
+# Auth routes
+# ──────────────────────────────────────────────────────────────
+@app.route("/login", methods=["GET", "POST"])
+def login_page():
+    error = None
+    if request.method == "POST":
+        pw   = request.form.get("password", "")
+        totp = request.form.get("totp", "")
+        auth = _load_auth()
+        if not auth:
+            error = "Auth not set up. Run: python hm_dashboard.py --set-password"
+        else:
+            time.sleep(1)   # brute-force protection
+            pw_ok   = check_password_hash(auth.get("pw_hash", "x"), pw)
+            totp_ok = pyotp.TOTP(auth.get("totp_secret", "x")).verify(totp, valid_window=1)
+            if pw_ok and totp_ok:
+                session.clear()
+                session["authenticated"] = True
+                session["last_active"]   = time.time()
+                return redirect(url_for("overview"))
+            error = "Invalid password or authenticator code."
+    return render_template("login.html", error=error)
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login_page"))
+
+# ──────────────────────────────────────────────────────────────
+# Page routes
+# ──────────────────────────────────────────────────────────────
+@app.route("/")
+@login_required
+def overview():
+    return render_template("overview.html", page="overview",
+                           trading_enabled=TRADING_ENABLED)
+
+@app.route("/positions")
+@login_required
+def positions():
+    return render_template("positions.html", page="positions",
+                           trading_enabled=TRADING_ENABLED)
+
+@app.route("/backtest")
+@login_required
+def backtest():
+    return render_template("backtest.html", page="backtest")
+
+@app.route("/universe")
+@login_required
+def universe():
+    return render_template("universe.html", page="universe")
+
+@app.route("/history")
+@login_required
+def history():
+    return render_template("history.html", page="history")
+
+@app.route("/logs")
+@login_required
+def logs():
+    return render_template("logs.html", page="logs")
+
+# ──────────────────────────────────────────────────────────────
+# API — Overview
+# ──────────────────────────────────────────────────────────────
+@app.route("/api/overview")
+@login_required
+def api_overview():
+    hm_pos  = read_hm_positions()
+    ts_pos  = read_ts_positions()
+    nse_pos = read_nse200_signals()
+
+    all_syms = list({
+        *(p.get("symbol", "")  for p in hm_pos),
+        *(p.get("Symbol", "")  for p in ts_pos),
+        *(p.get("ticker", "")  for p in nse_pos),
+    } - {""})
+    ltps = _get_ltps(all_syms)
+
+    unreal = 0.0
+    for p in hm_pos:
+        sym = p.get("symbol", "")
+        try:
+            unreal += (ltps.get(sym, 0) - float(p.get("entry_px", 0))) * int(p.get("qty", 0))
+        except Exception:
+            pass
+    for p in ts_pos:
+        sym = p.get("Symbol", "")
+        try:
+            unreal += (ltps.get(sym, 0) - float(p.get("BuyPrice", 0))) * int(p.get("Qty", 0))
+        except Exception:
+            pass
+
+    def bot_health(bot_dir: str, name: str) -> dict:
+        lines, lag = _bot_log_tail(bot_dir, 3)
+        if lag < 120:
+            status = "active"
+        elif lag < 600:
+            status = "idle"
+        else:
+            status = "offline"
+        return {
+            "name":       name,
+            "status":     status,
+            "lag_s":      int(lag) if lag != float("inf") else None,
+            "last_lines": lines[-3:],
+        }
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    today_trades: list[dict] = []
+    for tag, path in [
+        ("TS",  os.path.join(TRIPLE_SCREEN_DIR, "ts_trades.csv")),
+        ("MOM", os.path.join(NSE200_DIR,        "nse200_trades.csv")),
+        ("HM",  os.path.join(HM_DIR,            "hm_trades.csv")),
+    ]:
+        for row in _read_csv_dicts(path):
+            if row.get("date", "") == today:
+                row["_bot"] = tag
+                today_trades.append(row)
+
+    return jsonify({
+        "available_cash":  _get_angel_balance(),
+        "unrealised_pnl":  round(unreal, 2),
+        "open_positions":  len(hm_pos) + len(ts_pos) + len(nse_pos),
+        "bots": {
+            "ts":  bot_health(TRIPLE_SCREEN_DIR, "Triple Screen"),
+            "mom": bot_health(NSE200_DIR,        "NSE200 Momentum"),
+            "hm":  bot_health(HM_DIR,            "Hilega Milega"),
+        },
+        "today_trades": today_trades,
+    })
+
+# ──────────────────────────────────────────────────────────────
+# API — Positions
+# ──────────────────────────────────────────────────────────────
+@app.route("/api/positions")
+@login_required
+def api_positions():
+    hm_pos  = read_hm_positions()
+    ts_pos  = read_ts_positions()
+    nse_pos = read_nse200_signals()
+    all_syms = list({
+        *(p.get("symbol", "") for p in hm_pos),
+        *(p.get("Symbol", "") for p in ts_pos),
+        *(p.get("ticker", "") for p in nse_pos),
+    } - {""})
+    ltps = _get_ltps(all_syms)
+
+    def enrich_hm(p: dict) -> dict:
+        sym   = p.get("symbol", "")
+        ltp   = ltps.get(sym, 0.0)
+        entry = float(p.get("entry_px", 0) or 0)
+        qty   = int(p.get("qty", 0) or 0)
+        pnl_pct = round(100 * (ltp - entry) / entry, 2) if entry else 0
+        return {**p, "ltp": ltp, "pnl_pct": pnl_pct,
+                "pnl_rs": round((ltp - entry) * qty, 2),
+                "win_rate": _win_rate_for_symbol(sym)}
+
+    def enrich_ts(p: dict) -> dict:
+        sym   = p.get("Symbol", "")
+        ltp   = ltps.get(sym, 0.0)
+        entry = float(p.get("BuyPrice", 0) or 0)
+        qty   = int(p.get("Qty", 0) or 0)
+        pnl_pct = round(100 * (ltp - entry) / entry, 2) if entry else 0
+        return {**p, "ltp": ltp, "pnl_pct": pnl_pct,
+                "pnl_rs": round((ltp - entry) * qty, 2),
+                "win_rate": _win_rate_for_symbol(sym)}
+
+    def enrich_nse(p: dict) -> dict:
+        sym   = p.get("ticker", "")
+        ltp   = ltps.get(sym, 0.0)
+        entry = float(p.get("price", 0) or 0)
+        qty   = int(p.get("qty", 0) or 0)
+        pnl_pct = round(100 * (ltp - entry) / entry, 2) if entry else 0
+        return {**p, "ltp": ltp, "pnl_pct": pnl_pct,
+                "pnl_rs": round((ltp - entry) * qty, 2),
+                "win_rate": _win_rate_for_symbol(sym)}
+
+    return jsonify({
+        "hm":  [enrich_hm(p)  for p in hm_pos],
+        "ts":  [enrich_ts(p)  for p in ts_pos],
+        "nse": [enrich_nse(p) for p in nse_pos],
+    })
+
+@app.route("/api/sparkline/<symbol>")
+@login_required
+def api_sparkline(symbol: str):
+    return jsonify(_get_sparkline(symbol.upper()))
+
+# ──────────────────────────────────────────────────────────────
+# API — Orders (TOTP required on every order)
+# ──────────────────────────────────────────────────────────────
+@app.route("/api/order", methods=["POST"])
+@login_required
+def api_order():
+    data   = request.get_json(force=True)
+    symbol = str(data.get("symbol", "")).upper()
+    txn    = str(data.get("txn", "")).upper()
+    totp   = str(data.get("totp", ""))
+    try:
+        qty = int(data.get("qty", 0))
+    except (TypeError, ValueError):
+        return jsonify({"status": "rejected", "message": "qty must be an integer"}), 400
+
+    if not _verify_totp(totp):
+        return jsonify({"status": "rejected", "message": "Invalid authenticator code"}), 403
+    if txn not in ("BUY", "SELL"):
+        return jsonify({"status": "rejected", "message": "txn must be BUY or SELL"}), 400
+    if qty <= 0:
+        return jsonify({"status": "rejected", "message": "qty must be positive"}), 400
+
+    result = _place_order(symbol, txn, qty)
+
+    with open(ORDER_LOG_FILE, "a", newline="") as f:
+        csv.writer(f).writerow([
+            datetime.now().isoformat(), request.remote_addr,
+            symbol, txn, qty, result.get("status"), "totp_verified",
+        ])
+    return jsonify(result)
+
+# ──────────────────────────────────────────────────────────────
+# API — Backtest subprocess
+# ──────────────────────────────────────────────────────────────
+_BACKTEST_SCRIPTS = {
+    "hm":  (HM_DIR,            "hm_backtest.py"),
+    "ts":  (TRIPLE_SCREEN_DIR, "ts_backtest.py"),
+    "nse": (NSE200_DIR,        "nse200_backtest.py"),
+}
+
+@app.route("/api/backtest/run", methods=["POST"])
+@login_required
+def api_backtest_run():
+    global _backtest_proc
+    with _backtest_lock:
+        if _backtest_proc and _backtest_proc.poll() is None:
+            return jsonify({"status": "running", "message": "Backtest already running"})
+
+        data    = request.get_json(force=True)
+        model   = str(data.get("model", "hm")).lower()
+        stocks  = [str(s).upper() for s in data.get("stocks", [])]
+        start   = str(data.get("start", ""))
+        capital = str(data.get("capital", ""))
+        flags   = [str(f) for f in data.get("flags", [])]
+
+        if model not in _BACKTEST_SCRIPTS:
+            return jsonify({"status": "error", "message": f"Unknown model: {model}"}), 400
+
+        if model == "nse" and stocks and len(stocks) < 5:
+            return jsonify({
+                "status": "warning",
+                "message": "NSE200 backtest needs at least 5 stocks for rotation to work.",
+            }), 400
+
+        bot_dir, script = _BACKTEST_SCRIPTS[model]
+        cmd = ["python", script]
+        if stocks:
+            cmd += ["--stocks"] + stocks
+        if start:
+            cmd += ["--start", start]
+        if capital:
+            cmd += ["--capital", capital]
+        cmd += flags
+
+        _backtest_proc = subprocess.Popen(
+            cmd, cwd=bot_dir,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1,
+        )
+
+        def _stream():
+            assert _backtest_proc is not None
+            for line in _backtest_proc.stdout:
+                socketio.emit("backtest_output", {"line": line.rstrip()})
+            _backtest_proc.wait()
+            socketio.emit("backtest_done", {"returncode": _backtest_proc.returncode, "model": model})
+
+        Thread(target=_stream, daemon=True).start()
+        return jsonify({"status": "started"})
+
+@app.route("/api/backtest/cancel", methods=["POST"])
+@login_required
+def api_backtest_cancel():
+    global _backtest_proc
+    with _backtest_lock:
+        if _backtest_proc and _backtest_proc.poll() is None:
+            _backtest_proc.terminate()
+            return jsonify({"status": "cancelled"})
+    return jsonify({"status": "not_running"})
+
+@app.route("/api/backtest/status")
+@login_required
+def api_backtest_status():
+    with _backtest_lock:
+        running = _backtest_proc is not None and _backtest_proc.poll() is None
+    return jsonify({"running": running})
+
+@app.route("/api/backtest/results/<model>")
+@login_required
+def api_backtest_results(model: str):
+    csv_map = {
+        "hm":  os.path.join(HM_DIR,            "hm_trades.csv"),
+        "ts":  os.path.join(TRIPLE_SCREEN_DIR, "ts_trades.csv"),
+        "nse": os.path.join(NSE200_DIR,        "nse200_trades.csv"),
+    }
+    path = csv_map.get(model.lower())
+    if not path:
+        return jsonify({"error": "unknown model"}), 400
+    trades = _read_csv_dicts(path)
+    per_stock: dict[str, dict] = {}
+    for row in trades:
+        sym = row.get("symbol", "")
+        if not sym:
+            continue
+        s = per_stock.setdefault(sym, {
+            "symbol": sym, "trades": 0, "wins": 0,
+            "total_pnl": 0.0, "total_pct": 0.0, "hold_days": 0,
+        })
+        s["trades"] += 1
+        try:
+            pnl  = float(row.get("pnl", 0) or 0)
+            pct  = float(row.get("pnl_pct", 0) or 0)
+            days = int(row.get("held_days", 0) or 0)
+            s["total_pnl"] += pnl
+            s["total_pct"] += pct
+            s["hold_days"] += days
+            if pnl > 0:
+                s["wins"] += 1
+        except Exception:
+            pass
+    result_list = []
+    for sym, s in per_stock.items():
+        t = s["trades"]
+        result_list.append({
+            "symbol":   sym,
+            "trades":   t,
+            "net_pnl":  round(s["total_pnl"], 2),
+            "win_rate": round(100 * s["wins"] / t, 1) if t else 0,
+            "avg_ret":  round(s["total_pct"] / t, 2) if t else 0,
+            "avg_hold": round(s["hold_days"] / t, 1) if t else 0,
+        })
+    return jsonify({"per_stock": result_list, "analytics": _compute_analytics(trades)})
+
+# ──────────────────────────────────────────────────────────────
+# API — Universe manager
+# ──────────────────────────────────────────────────────────────
+@app.route("/api/universe", methods=["GET"])
+@login_required
+def api_universe_get():
+    return jsonify(read_custom_universe())
+
+@app.route("/api/universe", methods=["POST"])
+@login_required
+def api_universe_save():
+    data = request.get_json(force=True)
+    write_custom_universe(data)
+    return jsonify({"status": "saved"})
+
+# ──────────────────────────────────────────────────────────────
+# API — Trade history
+# ──────────────────────────────────────────────────────────────
+@app.route("/api/history")
+@login_required
+def api_history():
+    bot    = request.args.get("bot",    "all").lower()
+    period = request.args.get("period", "all").lower()
+    action = request.args.get("action", "all").lower()
+    result = request.args.get("result", "all").lower()
+    search = request.args.get("search", "").upper()
+    page   = max(1, int(request.args.get("page", 1)))
+
+    trades = _all_trades(bot, PERIOD_DAYS.get(period))
+
+    if action != "all":
+        trades = [t for t in trades if t.get("action", "").lower() == action]
+    if result == "win":
+        trades = [t for t in trades if float(t.get("pnl", 0) or 0) > 0]
+    elif result == "loss":
+        trades = [t for t in trades if float(t.get("pnl", 0) or 0) <= 0]
+    elif result == "stop":
+        trades = [t for t in trades if "stop" in (t.get("reason") or "").lower()]
+    if search:
+        trades = [t for t in trades if search in t.get("symbol", "").upper()]
+
+    analytics = _compute_analytics(trades)
+
+    per_stock: dict[str, dict] = {}
+    for t in trades:
+        sym = t.get("symbol", "")
+        if not sym:
+            continue
+        s = per_stock.setdefault(sym, {"symbol": sym, "trades": 0, "wins": 0, "total_pnl": 0.0})
+        s["trades"] += 1
+        pnl = float(t.get("pnl", 0) or 0)
+        s["total_pnl"] += pnl
+        if pnl > 0:
+            s["wins"] += 1
+    per_stock_list = [
+        {"symbol": sym, "trades": s["trades"], "total_pnl": round(s["total_pnl"], 2),
+         "win_rate": round(100 * s["wins"] / s["trades"], 1) if s["trades"] else 0}
+        for sym, s in per_stock.items()
+    ]
+
+    per_page = 50
+    total    = len(trades)
+    page_trades = trades[(page - 1) * per_page: page * per_page]
+
+    return jsonify({
+        "analytics":  analytics,
+        "per_stock":  per_stock_list,
+        "trades":     page_trades,
+        "total":      total,
+        "page":       page,
+        "pages":      max(1, (total + per_page - 1) // per_page),
+    })
+
+@app.route("/api/history/download")
+@login_required
+def api_history_download():
+    bot    = request.args.get("bot",    "all").lower()
+    period = request.args.get("period", "all").lower()
+    trades = _all_trades(bot, PERIOD_DAYS.get(period))
+    output = io.StringIO()
+    if trades:
+        writer = csv.DictWriter(output, fieldnames=list(trades[0].keys()))
+        writer.writeheader()
+        writer.writerows(trades)
+    output.seek(0)
+    return Response(output.getvalue(), mimetype="text/csv",
+                    headers={"Content-Disposition": "attachment; filename=trade_history.csv"})
+
+# ──────────────────────────────────────────────────────────────
+# API — Logs
+# ──────────────────────────────────────────────────────────────
+_BOT_DIRS = {"ts": TRIPLE_SCREEN_DIR, "mom": NSE200_DIR, "hm": HM_DIR}
+
+@app.route("/api/logs/<bot>")
+@login_required
+def api_logs(bot: str):
+    bot_dir = _BOT_DIRS.get(bot.lower())
+    if not bot_dir:
+        return jsonify({"error": "unknown bot"}), 400
+    lines, lag = _bot_log_tail(bot_dir, 50)
+    return jsonify({"lines": lines, "lag_s": int(lag) if lag != float("inf") else None})
+
+@app.route("/api/logs/<bot>/download")
+@login_required
+def api_logs_download(bot: str):
+    bot_dir = _BOT_DIRS.get(bot.lower())
+    if not bot_dir:
+        return jsonify({"error": "unknown bot"}), 400
+    log_path = os.path.join(bot_dir, "bot.log")
+    return send_file(log_path, as_attachment=True, download_name=f"{bot}_bot.log")
+
+# ──────────────────────────────────────────────────────────────
+# WebSocket — reject unauthenticated connections
+# ──────────────────────────────────────────────────────────────
+@socketio.on("connect")
+def ws_connect():
+    if not session.get("authenticated"):
+        disconnect()
+        return False
+
+# ──────────────────────────────────────────────────────────────
+# CLI setup commands
+# ──────────────────────────────────────────────────────────────
+def cmd_set_password() -> None:
+    import getpass
+    pw1 = getpass.getpass("New dashboard password: ")
+    pw2 = getpass.getpass("Confirm password: ")
+    if pw1 != pw2:
+        print("Passwords do not match.")
+        sys.exit(1)
+    auth = _load_auth()
+    auth["pw_hash"] = generate_password_hash(pw1)
+    _save_auth(auth)
+    print("Password saved to dashboard_auth.json")
+
+def cmd_setup_2fa() -> None:
+    auth = _load_auth()
+    if not auth.get("totp_secret"):
+        secret = pyotp.random_base32()
+        auth["totp_secret"] = secret
+        _save_auth(auth)
+    else:
+        secret = auth["totp_secret"]
+    uri = pyotp.TOTP(secret).provisioning_uri(name="AliveGaming", issuer_name="HM Dashboard")
+    print(f"\nTOTP secret: {secret}")
+    print(f"\nProvisioning URI:\n{uri}\n")
+    try:
+        import qrcode
+        img = qrcode.make(uri)
+        qr_path = os.path.join(DASHBOARD_DIR, "totp_qr.png")
+        img.save(qr_path)
+        print(f"QR code saved to: {qr_path}")
+        print("Scan with Google Authenticator.")
+    except ImportError:
+        print("Install qrcode[pil] to generate a QR image, or scan the URI above manually.")
+
+# ──────────────────────────────────────────────────────────────
+# Entry point
+# ──────────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Alive Gaming Trading Dashboard")
+    parser.add_argument("--set-password", action="store_true", help="Set dashboard password")
+    parser.add_argument("--setup-2fa",    action="store_true", help="Configure Google Authenticator")
+    parser.add_argument("--port",         type=int, default=5000, help="Port to listen on")
+    args = parser.parse_args()
+
+    if args.set_password:
+        cmd_set_password()
+        sys.exit(0)
+    if args.setup_2fa:
+        cmd_setup_2fa()
+        sys.exit(0)
+
+    if not _load_auth():
+        print("WARNING: Auth not configured. Run:")
+        print("  python hm_dashboard.py --set-password")
+        print("  python hm_dashboard.py --setup-2fa")
+
+    Thread(target=_price_push_loop, daemon=True).start()
+    print(f"Alive Gaming Trading Dashboard starting on http://0.0.0.0:{args.port}")
+    print(f"Trading: {'ENABLED' if TRADING_ENABLED else 'DISABLED (paper mode)'}")
+    socketio.run(app, host="0.0.0.0", port=args.port, debug=False)
