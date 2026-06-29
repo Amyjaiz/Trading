@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+{% block title %}Trade History{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Trade History</h1>
+  <p>Full realised trade log across all three bots</p>
+</div>
+
+<div class="card" style="margin-bottom:16px">
+  <div class="filter-bar">
+    <span class="filter-label">Bot:</span>
+    <select id="f-bot" onchange="loadHistory()">
+      <option value="all">All Bots</option>
+      <option value="ts">Triple Screen</option>
+      <option value="mom">NSE200</option>
+      <option value="hm">Hilega Milega</option>
+    </select>
+    <span class="filter-label">Period:</span>
+    <button class="period-btn" data-period="1w"  onclick="setPeriod(this,'1w')">1W</button>
+    <button class="period-btn" data-period="1m"  onclick="setPeriod(this,'1m')">1M</button>
+    <button class="period-btn" data-period="3m"  onclick="setPeriod(this,'3m')">3M</button>
+    <button class="period-btn" data-period="6m"  onclick="setPeriod(this,'6m')">6M</button>
+    <button class="period-btn" data-period="1y"  onclick="setPeriod(this,'1y')">1Y</button>
+    <button class="period-btn active" data-period="all" onclick="setPeriod(this,'all')">All</button>
+    <span class="filter-label">Action:</span>
+    <select id="f-action" onchange="loadHistory()">
+      <option value="all">All</option>
+      <option value="buy">BUY</option>
+      <option value="sell">SELL</option>
+    </select>
+    <span class="filter-label">Result:</span>
+    <select id="f-result" onchange="loadHistory()">
+      <option value="all">All</option>
+      <option value="win">WIN</option>
+      <option value="loss">LOSS</option>
+      <option value="stop">STOP</option>
+    </select>
+    <input type="text" id="f-search" placeholder="Search symbol…" style="width:130px" oninput="loadHistory()">
+  </div>
+</div>
+
+<div class="kpi-row" id="analytics-row">
+  <div class="kpi-card"><div class="kpi-label">Total Realised P&L</div><div class="kpi-value" id="a-pnl">—</div></div>
+  <div class="kpi-card"><div class="kpi-label">Win Rate</div><div class="kpi-value" id="a-wr">—</div></div>
+  <div class="kpi-card"><div class="kpi-label">Total Trades</div><div class="kpi-value accent" id="a-trades">—</div></div>
+  <div class="kpi-card"><div class="kpi-label">Profit Factor</div><div class="kpi-value" id="a-pf">—</div></div>
+  <div class="kpi-card"><div class="kpi-label">Avg Hold Days</div><div class="kpi-value" id="a-hold">—</div></div>
+  <div class="kpi-card"><div class="kpi-label">Best Trade</div><div class="kpi-value pos" id="a-best">—</div></div>
+  <div class="kpi-card"><div class="kpi-label">Worst Trade</div><div class="kpi-value neg" id="a-worst">—</div></div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <span class="card-title">Per-Stock Breakdown</span>
+    <a class="btn btn-sm" id="csv-download" href="/api/history/download" download>↓ CSV</a>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Symbol</th><th>Trades</th><th>Win Rate</th><th>Total P&L</th></tr></thead>
+      <tbody id="stock-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <span class="card-title">Full Trade Log</span>
+    <span class="text-muted text-sm" id="trade-count"></span>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Date</th><th>Bot</th><th>Symbol</th><th>Action</th>
+          <th>Qty</th><th>Price</th><th>Entry</th><th>P&L</th><th>P&L%</th>
+          <th>Days</th><th>Reason</th>
+        </tr>
+      </thead>
+      <tbody id="trades-body"></tbody>
+    </table>
+  </div>
+  <div class="pagination" id="pagination"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+let _currentPeriod = 'all';
+let _currentPage   = 1;
+
+function setPeriod(btn, period) {
+  _currentPeriod = period;
+  _currentPage   = 1;
+  document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  loadHistory();
+}
+
+function buildParams() {
+  return new URLSearchParams({
+    bot:    document.getElementById('f-bot').value,
+    period: _currentPeriod,
+    action: document.getElementById('f-action').value,
+    result: document.getElementById('f-result').value,
+    search: document.getElementById('f-search').value.trim(),
+    page:   _currentPage,
+  });
+}
+
+async function loadHistory() {
+  _currentPage = 1;
+  const params = buildParams();
+  document.getElementById('csv-download').href = '/api/history/download?' + new URLSearchParams({
+    bot: params.get('bot'), period: _currentPeriod
+  });
+  try {
+    const d = await fetch('/api/history?' + params).then(r=>r.json());
+    renderAnalytics(d.analytics || {});
+    renderPerStock(d.per_stock || []);
+    renderTrades(d.trades || []);
+    document.getElementById('trade-count').textContent = `${d.total} trades`;
+    renderPagination(d.page, d.pages);
+  } catch(e) { console.error(e); }
+}
+
+function renderAnalytics(a) {
+  const pnlEl = document.getElementById('a-pnl');
+  pnlEl.textContent = fmtRs(a.total_pnl);
+  pnlEl.className = 'kpi-value ' + clsPnl(a.total_pnl||0);
+  document.getElementById('a-wr').textContent    = a.win_rate != null ? a.win_rate + '%' : '—';
+  document.getElementById('a-trades').textContent = a.total_trades || 0;
+  document.getElementById('a-pf').textContent    = a.profit_factor || '—';
+  document.getElementById('a-hold').textContent  = a.avg_hold ? a.avg_hold + 'd' : '—';
+  const best  = a.best_trade  || {};
+  const worst = a.worst_trade || {};
+  document.getElementById('a-best').textContent  = best.symbol  ? `${best.symbol} ${best.pct}%`  : '—';
+  document.getElementById('a-worst').textContent = worst.symbol ? `${worst.symbol} ${worst.pct}%` : '—';
+}
+
+function renderPerStock(rows) {
+  const tbody = document.getElementById('stock-body');
+  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="4" class="empty">No data</td></tr>'; return; }
+  tbody.innerHTML = [...rows]
+    .sort((a,b) => b.total_pnl - a.total_pnl)
+    .map(r => `<tr>
+      <td class="sym">${r.symbol}</td>
+      <td class="mono">${r.trades}</td>
+      <td class="mono ${r.win_rate>=50?'pos':'neg'}">${r.win_rate}%</td>
+      <td class="mono ${clsPnl(r.total_pnl)}">${fmtRs(r.total_pnl)}</td>
+    </tr>`).join('');
+}
+
+function renderTrades(trades) {
+  const tbody = document.getElementById('trades-body');
+  if (!trades.length) { tbody.innerHTML = '<tr><td colspan="11" class="empty">No trades</td></tr>'; return; }
+  tbody.innerHTML = trades.map(t => {
+    const pnl = parseFloat(t.pnl||0);
+    const bot = t._bot || '';
+    return `<tr>
+      <td class="mono">${t.date||''}</td>
+      <td><span class="tag tag-${bot.toLowerCase()}">${bot}</span></td>
+      <td class="sym">${t.symbol||''}</td>
+      <td>${t.action||''}</td>
+      <td class="mono">${t.qty||''}</td>
+      <td class="mono">₹${parseFloat(t.price||0).toLocaleString('en-IN')}</td>
+      <td class="mono">₹${parseFloat(t.entry_px||0).toLocaleString('en-IN')}</td>
+      <td class="mono ${clsPnl(pnl)}">${pnl ? fmtRs(pnl) : '—'}</td>
+      <td class="mono ${clsPnl(pnl)}">${t.pnl_pct ? fmtPct(parseFloat(t.pnl_pct)) : '—'}</td>
+      <td class="mono">${t.held_days||'—'}d</td>
+      <td class="text-muted text-sm">${t.reason||'—'}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderPagination(page, pages) {
+  const el = document.getElementById('pagination');
+  if (pages <= 1) { el.innerHTML = ''; return; }
+  const start = Math.max(1, page-2);
+  const end   = Math.min(pages, page+2);
+  let html = '';
+  if (page > 1) html += `<button class="page-btn" onclick="goPage(${page-1})">&#8249;</button>`;
+  for (let i=start; i<=end; i++) {
+    html += `<button class="page-btn ${i===page?'active':''}" onclick="goPage(${i})">${i}</button>`;
+  }
+  if (page < pages) html += `<button class="page-btn" onclick="goPage(${page+1})">&#8250;</button>`;
+  el.innerHTML = html;
+}
+
+async function goPage(p) {
+  _currentPage = p;
+  const d = await fetch('/api/history?' + buildParams()).then(r=>r.json());
+  renderTrades(d.trades || []);
+  renderPagination(d.page, d.pages);
+  document.getElementById('trade-count').textContent = `${d.total} trades`;
+}
+
+loadHistory();
+{% endblock %}

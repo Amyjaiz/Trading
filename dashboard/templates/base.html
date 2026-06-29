@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Alive Gaming — {% block title %}Trading Portal{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="brand-icon">◈</span>
+      <span>Alive Gaming</span>
+    </div>
+    <nav>
+      <a href="/"          class="{% if page=='overview'  %}active{% endif %}"><span class="nav-icon">⊞</span><span>Overview</span></a>
+      <a href="/positions" class="{% if page=='positions' %}active{% endif %}"><span class="nav-icon">◉</span><span>Positions</span></a>
+      <a href="/backtest"  class="{% if page=='backtest'  %}active{% endif %}"><span class="nav-icon">⟳</span><span>Backtest</span></a>
+      <a href="/universe"  class="{% if page=='universe'  %}active{% endif %}"><span class="nav-icon">☰</span><span>Universe</span></a>
+      <a href="/history"   class="{% if page=='history'   %}active{% endif %}"><span class="nav-icon">▦</span><span>History</span></a>
+      <a href="/logs"      class="{% if page=='logs'      %}active{% endif %}"><span class="nav-icon">≡</span><span>Logs</span></a>
+    </nav>
+    <div class="sidebar-footer">
+      <a href="/logout">⎋ Logout</a>
+    </div>
+  </aside>
+
+  <main class="content">
+    {% block content %}{% endblock %}
+  </main>
+
+  <div id="toast"></div>
+
+  <!-- Order TOTP modal -->
+  <div class="modal-overlay" id="orderModal">
+    <div class="modal">
+      <h3 id="modal-title">Place Order</h3>
+      {% if not trading_enabled %}
+      <div class="modal-sim-badge">SIMULATED — TRADING_ENABLED=False</div>
+      {% endif %}
+      <div class="modal-field">
+        <label>Symbol</label>
+        <input type="text" id="modal-symbol" readonly>
+      </div>
+      <div class="modal-field">
+        <label>Quantity</label>
+        <input type="number" id="modal-qty" min="1" value="1">
+      </div>
+      <div class="modal-field">
+        <label>Google Authenticator Code</label>
+        <input type="text" id="modal-totp" maxlength="6" placeholder="000000" autocomplete="off" inputmode="numeric">
+      </div>
+      <div class="modal-actions">
+        <button class="btn" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" id="modal-confirm" onclick="submitOrder()">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const socket = io({ transports: ['websocket', 'polling'] });
+    socket.on('connect',    () => console.log('WS connected'));
+    socket.on('disconnect', () => console.log('WS disconnected'));
+
+    function toast(msg, type='success', ms=3500) {
+      const el = document.createElement('div');
+      el.className = `toast-msg ${type}`;
+      el.textContent = msg;
+      document.getElementById('toast').appendChild(el);
+      setTimeout(() => el.remove(), ms);
+    }
+
+    function fmtRs(n) {
+      if (n == null) return '—';
+      const sign = n >= 0 ? '+' : '';
+      return sign + '₹' + Math.abs(n).toLocaleString('en-IN', {maximumFractionDigits:0});
+    }
+    function fmtPct(n) {
+      if (n == null) return '—';
+      return (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
+    }
+    function clsPnl(n) { return n >= 0 ? 'pos' : 'neg'; }
+
+    let _orderTxn = 'BUY';
+    function openModal(symbol, txn, defaultQty) {
+      _orderTxn = txn;
+      document.getElementById('modal-title').textContent = `${txn} — ${symbol}`;
+      document.getElementById('modal-symbol').value = symbol;
+      document.getElementById('modal-qty').value = defaultQty || 1;
+      document.getElementById('modal-totp').value = '';
+      document.getElementById('modal-confirm').textContent = txn;
+      document.getElementById('modal-confirm').className = txn === 'BUY' ? 'btn btn-buy' : 'btn btn-sell';
+      document.getElementById('orderModal').classList.add('open');
+      setTimeout(() => document.getElementById('modal-totp').focus(), 100);
+    }
+    function closeModal() {
+      document.getElementById('orderModal').classList.remove('open');
+    }
+    async function submitOrder() {
+      const symbol = document.getElementById('modal-symbol').value;
+      const qty    = parseInt(document.getElementById('modal-qty').value);
+      const totp   = document.getElementById('modal-totp').value.trim();
+      if (!totp || totp.length !== 6) { toast('Enter 6-digit TOTP code', 'error'); return; }
+      if (qty < 1) { toast('Qty must be at least 1', 'error'); return; }
+      document.getElementById('modal-confirm').disabled = true;
+      try {
+        const res  = await fetch('/api/order', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({symbol, txn: _orderTxn, qty, totp}),
+        });
+        const data = await res.json();
+        closeModal();
+        if (data.status === 'ok')        toast(`${_orderTxn} ${symbol} ×${qty} placed`, 'success');
+        else if (data.status === 'simulated') toast(`SIMULATED: ${_orderTxn} ${symbol} ×${qty}`, 'warn');
+        else toast(data.message || 'Order failed', 'error');
+      } catch(e) {
+        toast('Network error', 'error');
+      }
+      document.getElementById('modal-confirm').disabled = false;
+    }
+
+    document.getElementById('orderModal').addEventListener('click', function(e) {
+      if (e.target === this) closeModal();
+    });
+
+    {% block scripts %}{% endblock %}
+  </script>
+</body>
+</html>

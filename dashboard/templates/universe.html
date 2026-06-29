@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{% block title %}Universe Manager{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="flex items-center gap-8">
+    <div>
+      <h1>Universe Manager</h1>
+      <p>Add or remove stocks from bot universes without editing Python source files</p>
+    </div>
+    <div class="ml-auto flex gap-8">
+      <span id="pending-indicator" style="display:none" class="pending-badge">UNSAVED CHANGES</span>
+      <button class="btn btn-primary" onclick="saveUniverse()">Save Changes</button>
+    </div>
+  </div>
+</div>
+
+<div class="uni-tabs">
+  <div class="uni-tab active" onclick="switchUniTab('hm')">Hilega Milega</div>
+  <div class="uni-tab"        onclick="switchUniTab('ts')">Triple Screen</div>
+  <div class="uni-tab"        onclick="switchUniTab('nse')">NSE200</div>
+</div>
+
+<div class="uni-panel active" id="uni-hm">
+  <div class="card">
+    <div class="card-header"><span class="card-title">Add stocks to HM</span></div>
+    <div class="flex gap-8 items-center" style="margin-bottom:12px">
+      <input type="text" id="hm-add-input" placeholder="Symbol e.g. CGPOWER" style="width:160px;padding:8px 12px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--font-mono)"
+        onkeydown="if(event.key==='Enter')addToBot('hm')">
+      <button class="btn btn-primary" onclick="addToBot('hm')">+ Add</button>
+    </div>
+    <div class="stock-grid" id="hm-add-chips"></div>
+  </div>
+  <div class="card">
+    <div class="card-header"><span class="card-title">Remove stocks from HM</span></div>
+    <p class="text-muted text-sm" style="margin-bottom:12px">Click × to mark for removal. Changes take effect on next bot run.</p>
+    <div class="stock-grid" id="hm-remove-chips"></div>
+  </div>
+</div>
+
+<div class="uni-panel" id="uni-ts">
+  <div class="card">
+    <div class="card-header"><span class="card-title">Add stocks to Triple Screen</span></div>
+    <div class="flex gap-8 items-center" style="margin-bottom:12px">
+      <input type="text" id="ts-add-input" placeholder="Symbol e.g. IIFL" style="width:160px;padding:8px 12px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--font-mono)"
+        onkeydown="if(event.key==='Enter')addToBot('triple_screen')">
+      <button class="btn btn-primary" onclick="addToBot('triple_screen')">+ Add</button>
+    </div>
+    <div class="stock-grid" id="ts-add-chips"></div>
+  </div>
+  <div class="card">
+    <div class="card-header"><span class="card-title">Remove from Triple Screen</span></div>
+    <div class="stock-grid" id="ts-remove-chips"></div>
+  </div>
+</div>
+
+<div class="uni-panel" id="uni-nse">
+  <div class="card">
+    <div class="card-header"><span class="card-title">Extra stocks for NSE200 (beyond Nifty 200)</span></div>
+    <div class="flex gap-8 items-center" style="margin-bottom:12px">
+      <input type="text" id="nse-add-input" placeholder="Symbol e.g. BSE" style="width:160px;padding:8px 12px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--font-mono)"
+        onkeydown="if(event.key==='Enter')addToBot('nse200')">
+      <button class="btn btn-primary" onclick="addToBot('nse200')">+ Add</button>
+    </div>
+    <div class="stock-grid" id="nse-add-chips"></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+let _universe   = {};
+let _hasChanges = false;
+
+function switchUniTab(t) {
+  document.querySelectorAll('.uni-tab').forEach(el => el.classList.toggle('active', el.textContent.toLowerCase().includes(t==='nse'?'nse':t)));
+  document.querySelectorAll('.uni-panel').forEach(el => el.classList.toggle('active', el.id === 'uni-' + t));
+}
+
+function markChanged() {
+  _hasChanges = true;
+  document.getElementById('pending-indicator').style.display = '';
+}
+
+function addToBot(botKey) {
+  const inputId = botKey === 'triple_screen' ? 'ts-add-input' : botKey === 'nse200' ? 'nse-add-input' : 'hm-add-input';
+  const sym = document.getElementById(inputId).value.trim().toUpperCase();
+  if (!sym) return;
+  document.getElementById(inputId).value = '';
+  if (botKey === 'nse200') {
+    if (!_universe.nse200.extra.includes(sym)) {
+      _universe.nse200.extra.push(sym);
+      markChanged(); renderAll();
+    }
+  } else {
+    if (!_universe[botKey].add.includes(sym)) {
+      _universe[botKey].add.push(sym);
+      markChanged(); renderAll();
+    }
+  }
+}
+
+function removeFromAdd(botKey, sym) {
+  if (botKey === 'nse200') {
+    _universe.nse200.extra = _universe.nse200.extra.filter(s => s !== sym);
+  } else {
+    _universe[botKey].add = _universe[botKey].add.filter(s => s !== sym);
+  }
+  markChanged(); renderAll();
+}
+
+function markForRemoval(botKey, sym) {
+  if (!_universe[botKey].remove.includes(sym)) {
+    _universe[botKey].remove.push(sym);
+  } else {
+    _universe[botKey].remove = _universe[botKey].remove.filter(s => s !== sym);
+  }
+  markChanged(); renderAll();
+}
+
+function renderChips(containerId, items, botKey, isRemoveList=false) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  if (!items.length) { el.innerHTML = '<span class="text-muted text-sm">None</span>'; return; }
+  el.innerHTML = items.map(sym => {
+    const cls = isRemoveList ? 'stock-chip removed' : 'stock-chip added';
+    const onclick = isRemoveList
+      ? `markForRemoval('${botKey}','${sym}')`
+      : `removeFromAdd('${botKey}','${sym}')`;
+    return `<span class="${cls}">${sym}<button onclick="${onclick}">×</button></span>`;
+  }).join('');
+}
+
+function renderAll() {
+  const u = _universe;
+  renderChips('hm-add-chips',     u.hm?.add     || [], 'hm');
+  renderChips('hm-remove-chips',  u.hm?.remove  || [], 'hm', true);
+  renderChips('ts-add-chips',     u.triple_screen?.add    || [], 'triple_screen');
+  renderChips('ts-remove-chips',  u.triple_screen?.remove || [], 'triple_screen', true);
+  renderChips('nse-add-chips',    u.nse200?.extra || [], 'nse200');
+}
+
+async function saveUniverse() {
+  await fetch('/api/universe', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(_universe),
+  });
+  _hasChanges = false;
+  document.getElementById('pending-indicator').style.display = 'none';
+  toast('Universe saved — bots pick up changes on next run', 'success');
+}
+
+async function init() {
+  const data = await fetch('/api/universe').then(r=>r.json());
+  _universe = {
+    hm:            data.hm            || {add:[],remove:[]},
+    triple_screen: data.triple_screen || {add:[],remove:[]},
+    nse200:        data.nse200        || {extra:[]},
+  };
+  renderAll();
+}
+
+init();
+{% endblock %}

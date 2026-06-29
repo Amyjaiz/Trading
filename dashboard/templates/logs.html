@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}Logs{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="flex items-center gap-8">
+    <div>
+      <h1>Logs</h1>
+      <p>Live bot log viewer — refreshes every 15 s</p>
+    </div>
+    <div class="ml-auto">
+      <button class="btn" onclick="loadAllLogs()">⟳ Refresh All</button>
+    </div>
+  </div>
+</div>
+
+<div class="log-grid">
+  <div class="log-panel">
+    <div class="log-header">
+      <span class="log-title"><span class="tag tag-ts">TS</span> Triple Screen</span>
+      <div class="flex items-center gap-8">
+        <span class="lag-badge" id="lag-ts">—</span>
+        <button class="btn btn-sm" onclick="loadLog('ts')">⟳</button>
+      </div>
+    </div>
+    <div class="log-body" id="log-ts"></div>
+    <div class="log-footer">
+      <a class="btn btn-sm" href="/api/logs/ts/download" download>↓ Download</a>
+    </div>
+  </div>
+
+  <div class="log-panel">
+    <div class="log-header">
+      <span class="log-title"><span class="tag tag-mom">MOM</span> NSE200</span>
+      <div class="flex items-center gap-8">
+        <span class="lag-badge" id="lag-mom">—</span>
+        <button class="btn btn-sm" onclick="loadLog('mom')">⟳</button>
+      </div>
+    </div>
+    <div class="log-body" id="log-mom"></div>
+    <div class="log-footer">
+      <a class="btn btn-sm" href="/api/logs/mom/download" download>↓ Download</a>
+    </div>
+  </div>
+
+  <div class="log-panel">
+    <div class="log-header">
+      <span class="log-title"><span class="tag tag-hm">HM</span> Hilega Milega</span>
+      <div class="flex items-center gap-8">
+        <span class="lag-badge" id="lag-hm">—</span>
+        <button class="btn btn-sm" onclick="loadLog('hm')">⟳</button>
+      </div>
+    </div>
+    <div class="log-body" id="log-hm"></div>
+    <div class="log-footer">
+      <a class="btn btn-sm" href="/api/logs/hm/download" download>↓ Download</a>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+function classifyLine(line) {
+  const l = line.toLowerCase();
+  if (l.includes('error') || l.includes('exception') || l.includes('traceback')) return 'error';
+  if (l.includes('warn') || l.includes('warning')) return 'warn';
+  if (l.includes('info')) return 'info';
+  return 'other';
+}
+
+function lagClass(lagS) {
+  if (lagS == null)   return 'lag-danger';
+  if (lagS < 120)     return 'lag-good';
+  if (lagS < 600)     return 'lag-warn';
+  return 'lag-danger';
+}
+
+function lagText(lagS) {
+  if (lagS == null) return 'No log';
+  if (lagS < 60)    return `⟳ ${lagS}s ago`;
+  if (lagS < 3600)  return `⟳ ${Math.round(lagS/60)}m ago`;
+  return `⟳ ${Math.round(lagS/3600)}h ago`;
+}
+
+async function loadLog(bot) {
+  try {
+    const d = await fetch('/api/logs/' + bot).then(r=>r.json());
+    const bodyEl = document.getElementById('log-' + bot);
+    const lagEl  = document.getElementById('lag-' + bot);
+    const lines  = d.lines || [];
+    bodyEl.innerHTML = lines.map(line =>
+      `<div class="log-line ${classifyLine(line)}">${escHtml(line)}</div>`
+    ).join('') || '<div class="log-line other">No log data</div>';
+    bodyEl.scrollTop = bodyEl.scrollHeight;
+    lagEl.textContent = lagText(d.lag_s);
+    lagEl.className   = 'lag-badge ' + lagClass(d.lag_s);
+  } catch(e) {
+    document.getElementById('log-' + bot).textContent = 'Error loading log';
+  }
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function loadAllLogs() {
+  ['ts','mom','hm'].forEach(loadLog);
+}
+
+loadAllLogs();
+setInterval(loadAllLogs, 15000);
+{% endblock %}
