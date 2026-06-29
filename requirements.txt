@@ -1,0 +1,13 @@
+flask
+flask-socketio
+werkzeug
+pyotp
+qrcode[pil]
+yfinance
+pandas
+numpy
+lightgbm
+scikit-learn
+joblib
+smartapi-python
+requests
