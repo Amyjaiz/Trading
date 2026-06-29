@@ -1,0 +1,344 @@
+{% extends "base.html" %}
+{% block title %}Backtest{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Backtest</h1>
+  <p>Run backtests from the browser — output streams live</p>
+</div>
+
+<div class="bt-tabs">
+  <div class="bt-tab active" data-model="hm"  onclick="switchModel('hm')">Hilega Milega</div>
+  <div class="bt-tab"        data-model="ts"  onclick="switchModel('ts')">Triple Screen</div>
+  <div class="bt-tab"        data-model="nse" onclick="switchModel('nse')">NSE200 Momentum</div>
+</div>
+
+<div class="bt-panel active" id="panel-hm">
+  <div class="bt-controls">
+    <div class="bt-controls-row">
+      <div class="bt-field"><label>Start Date</label><input type="date" id="hm-start" value="2024-01-01"></div>
+      <div class="bt-field"><label>Capital (₹)</label><input type="number" id="hm-capital" value="100000" step="10000"></div>
+      <div class="bt-field"><label>Exit Mode</label>
+        <select id="hm-exit">
+          <option value="">Default (rsi50_and_vwap)</option>
+          <option value="--vwapsweep">VWAP Sweep (all modes)</option>
+        </select>
+      </div>
+      <div class="bt-field"><label>ML Filter</label>
+        <select id="hm-ml"><option value="">Off</option><option value="--ml">On</option></select>
+      </div>
+    </div>
+    <div style="margin-bottom:8px">
+      <label class="text-muted text-sm">Stock filter (blank = full 213-stock universe):</label>
+      <div class="flex gap-8" style="margin-top:8px;flex-wrap:wrap;align-items:center">
+        <div class="stock-tags" id="hm-stock-tags"></div>
+        <input type="text" id="hm-stock-input" placeholder="e.g. CGPOWER" style="width:130px;padding:5px 8px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--font-mono);font-size:12px" onkeydown="addStock(event,'hm')">
+      </div>
+    </div>
+    <div class="flex gap-8">
+      <button class="btn btn-primary" id="hm-run" onclick="runBacktest('hm')">&#9654; Run Backtest</button>
+      <button class="btn" onclick="runBacktest('hm',true)">&#9889; Run Sweep</button>
+      <button class="btn btn-danger" id="hm-cancel" style="display:none" onclick="cancelBacktest()">&#10005; Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="bt-panel" id="panel-ts">
+  <div class="bt-controls">
+    <div class="bt-controls-row">
+      <div class="bt-field"><label>Start Date</label><input type="date" id="ts-start" value="2022-01-01"></div>
+      <div class="bt-field"><label>Capital (₹)</label><input type="number" id="ts-capital" value="500000" step="10000"></div>
+      <div class="bt-field"><label>Trigger Mode</label>
+        <select id="ts-trigger">
+          <option value="">Per-stock best trigger</option>
+          <option value="--notrigger">Any trigger fires</option>
+        </select>
+      </div>
+    </div>
+    <div style="margin-bottom:8px">
+      <label class="text-muted text-sm">Stock filter (blank = full 313-stock universe):</label>
+      <div class="flex gap-8" style="margin-top:8px;flex-wrap:wrap;align-items:center">
+        <div class="stock-tags" id="ts-stock-tags"></div>
+        <input type="text" id="ts-stock-input" placeholder="e.g. IIFL" style="width:130px;padding:5px 8px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--font-mono);font-size:12px" onkeydown="addStock(event,'ts')">
+      </div>
+    </div>
+    <div class="flex gap-8">
+      <button class="btn btn-primary" id="ts-run" onclick="runBacktest('ts')">&#9654; Run Backtest</button>
+      <button class="btn" onclick="runBacktest('ts',true)">&#9889; Run Sweep</button>
+      <button class="btn btn-danger" id="ts-cancel" style="display:none" onclick="cancelBacktest()">&#10005; Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="bt-panel" id="panel-nse">
+  <div class="bt-controls">
+    <div class="bt-controls-row">
+      <div class="bt-field"><label>Start Date</label><input type="date" id="nse-start" value="2020-01-01"></div>
+      <div class="bt-field"><label>Slots</label><input type="number" id="nse-slots" value="5" min="1" max="10"></div>
+      <div class="bt-field"><label>Window</label>
+        <select id="nse-window">
+          <option value="">Default (90d)</option>
+          <option value="--sweep">Sweep all windows</option>
+        </select>
+      </div>
+      <div class="bt-field"><label>Universe</label>
+        <select id="nse-universe">
+          <option value="">Cached</option>
+          <option value="--refresh-universe">Force refresh from NSE</option>
+        </select>
+      </div>
+    </div>
+    <div style="margin-bottom:8px">
+      <label class="text-muted text-sm">Stock filter — needs ≥5 stocks for rotation:</label>
+      <div class="flex gap-8" style="margin-top:8px;flex-wrap:wrap;align-items:center">
+        <div class="stock-tags" id="nse-stock-tags"></div>
+        <input type="text" id="nse-stock-input" placeholder="e.g. RELIANCE" style="width:130px;padding:5px 8px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--font-mono);font-size:12px" onkeydown="addStock(event,'nse')">
+      </div>
+    </div>
+    <div class="flex gap-8">
+      <button class="btn btn-primary" id="nse-run" onclick="runBacktest('nse')">&#9654; Run Backtest</button>
+      <button class="btn" onclick="runBacktest('nse',true)">&#9889; Run Sweep</button>
+      <button class="btn btn-danger" id="nse-cancel" style="display:none" onclick="cancelBacktest()">&#10005; Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="progress-bar-wrap" id="progress-wrap"><div class="progress-bar" id="progress-bar"></div></div>
+<div class="bt-terminal hidden" id="bt-terminal"></div>
+
+<div id="bt-results" style="display:none">
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">Results</span>
+      <button class="btn btn-sm" onclick="loadResults()">⟳ Reload</button>
+    </div>
+    <div class="bt-metrics" id="bt-metrics"></div>
+    <hr class="section-divider">
+    <div class="filter-bar">
+      <span class="filter-label">Filter:</span>
+      <input type="number" id="res-min-wr" placeholder="Min WR%" style="width:90px">
+      <input type="number" id="res-min-trades" placeholder="Min trades" style="width:90px">
+      <select id="res-sort" onchange="sortResults()">
+        <option value="net_pnl">Sort: Net P&L</option>
+        <option value="win_rate">Sort: Win Rate</option>
+        <option value="avg_ret">Sort: Avg Return</option>
+        <option value="trades">Sort: Trades</option>
+      </select>
+      <button class="btn btn-sm" onclick="filterResults()">Apply</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Symbol</th><th>Trades</th><th>Net P&L</th><th>Win Rate</th><th>Avg Ret%</th><th>Avg Hold</th><th></th></tr></thead>
+        <tbody id="results-body"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="addBotModal">
+  <div class="modal">
+    <h3>Add to Bot Universe</h3>
+    <p class="text-muted text-sm" style="margin-bottom:16px">Add <strong id="add-sym"></strong> to which bot?</p>
+    <div class="modal-field">
+      <label>Bot</label>
+      <select id="add-bot-select">
+        <option value="hm">Hilega Milega</option>
+        <option value="triple_screen">Triple Screen</option>
+        <option value="nse200">NSE200 Momentum</option>
+      </select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeAddModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmAddBot()">Add</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+let _currentModel = 'hm';
+let _stockLists   = {hm: [], ts: [], nse: []};
+let _allResults   = [];
+
+function switchModel(m) {
+  _currentModel = m;
+  document.querySelectorAll('.bt-tab').forEach(t => t.classList.toggle('active', t.dataset.model === m));
+  document.querySelectorAll('.bt-panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + m));
+}
+
+function addStock(e, model) {
+  if (e.key !== 'Enter') return;
+  const input = document.getElementById(model + '-stock-input');
+  const sym = input.value.trim().toUpperCase();
+  if (!sym) return;
+  if (!_stockLists[model].includes(sym)) {
+    _stockLists[model].push(sym);
+    renderStockTags(model);
+  }
+  input.value = '';
+}
+
+function removeStock(model, sym) {
+  _stockLists[model] = _stockLists[model].filter(s => s !== sym);
+  renderStockTags(model);
+}
+
+function renderStockTags(model) {
+  const wrap = document.getElementById(model + '-stock-tags');
+  wrap.innerHTML = _stockLists[model].map(s =>
+    `<span class="stock-tag">${s}<button onclick="removeStock('${model}','${s}')">×</button></span>`
+  ).join('');
+}
+
+async function runBacktest(model, sweep=false) {
+  const terminal  = document.getElementById('bt-terminal');
+  const progress  = document.getElementById('progress-wrap');
+  const resultsEl = document.getElementById('bt-results');
+  terminal.classList.remove('hidden');
+  terminal.textContent = `Starting ${model.toUpperCase()} backtest…\n`;
+  progress.style.display = 'block';
+  resultsEl.style.display = 'none';
+  document.getElementById(model+'-run').disabled = true;
+  document.getElementById(model+'-cancel').style.display = '';
+
+  const flags = [];
+  if (sweep) flags.push('--sweep');
+  if (model === 'hm') {
+    const exit = document.getElementById('hm-exit').value;
+    const ml   = document.getElementById('hm-ml').value;
+    if (exit) flags.push(exit);
+    if (ml)   flags.push(ml);
+  }
+  if (model === 'ts') {
+    const trig = document.getElementById('ts-trigger').value;
+    if (trig) flags.push(trig);
+  }
+  if (model === 'nse') {
+    const slots = document.getElementById('nse-slots').value;
+    const win   = document.getElementById('nse-window').value;
+    const uni   = document.getElementById('nse-universe').value;
+    if (slots) flags.push('--slots', slots);
+    if (win)   flags.push(win);
+    if (uni)   flags.push(uni);
+  }
+
+  const body = {
+    model,
+    stocks:  _stockLists[model],
+    start:   document.getElementById(model + '-start').value,
+    capital: model !== 'nse' ? document.getElementById(model + '-capital').value : '',
+    flags,
+  };
+
+  const res = await fetch('/api/backtest/run', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (data.status !== 'started') {
+    terminal.textContent += '\n' + (data.message || JSON.stringify(data));
+    document.getElementById(model+'-run').disabled = false;
+    document.getElementById(model+'-cancel').style.display = 'none';
+    if (data.status === 'warning') toast(data.message, 'warn');
+  }
+}
+
+async function cancelBacktest() {
+  await fetch('/api/backtest/cancel', {method:'POST'});
+  toast('Backtest cancelled', 'warn');
+}
+
+socket.on('backtest_output', d => {
+  const terminal = document.getElementById('bt-terminal');
+  terminal.textContent += d.line + '\n';
+  terminal.scrollTop = terminal.scrollHeight;
+});
+
+socket.on('backtest_done', d => {
+  const model = _currentModel;
+  document.getElementById(model+'-run').disabled = false;
+  document.getElementById(model+'-cancel').style.display = 'none';
+  document.getElementById('progress-wrap').style.display = 'none';
+  const terminal = document.getElementById('bt-terminal');
+  terminal.textContent += `\n── Completed (exit ${d.returncode}) ──\n`;
+  terminal.scrollTop = terminal.scrollHeight;
+  if (d.returncode === 0) {
+    toast('Backtest complete — loading results…', 'success');
+    loadResults();
+  } else {
+    toast('Backtest exited with errors', 'error');
+  }
+});
+
+async function loadResults() {
+  const res  = await fetch('/api/backtest/results/' + _currentModel);
+  const data = await res.json();
+  _allResults = data.per_stock || [];
+  const a = data.analytics || {};
+  document.getElementById('bt-metrics').innerHTML = [
+    ['CAGR', a.cagr ? a.cagr + '%' : '—'],
+    ['Sharpe', a.sharpe || '—'],
+    ['Max DD', a.maxdd || '—'],
+    ['Trades', a.total_trades || 0],
+    ['Win Rate', a.win_rate ? a.win_rate + '%' : '—'],
+    ['Profit Factor', a.profit_factor || '—'],
+    ['Avg Hold', a.avg_hold ? a.avg_hold + 'd' : '—'],
+  ].map(([l,v]) => `<div class="bt-metric"><div class="bt-metric-label">${l}</div><div class="bt-metric-value">${v}</div></div>`).join('');
+  document.getElementById('bt-results').style.display = '';
+  renderResultsTable(_allResults);
+}
+
+function filterResults() {
+  const minWR  = parseFloat(document.getElementById('res-min-wr').value) || 0;
+  const minTrd = parseInt(document.getElementById('res-min-trades').value) || 0;
+  renderResultsTable(_allResults.filter(r => r.win_rate >= minWR && r.trades >= minTrd));
+}
+
+function sortResults() {
+  const key = document.getElementById('res-sort').value;
+  renderResultsTable([..._allResults].sort((a,b) => (b[key]||0) - (a[key]||0)));
+}
+
+function renderResultsTable(rows) {
+  const tbody = document.getElementById('results-body');
+  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="7" class="empty">No results</td></tr>'; return; }
+  tbody.innerHTML = rows.map(r => {
+    const isDrag = r.net_pnl < 0;
+    return `<tr>
+      <td class="sym">${r.symbol} ${isDrag ? '<span class="drag-tag">◄ DRAG</span>' : ''}</td>
+      <td class="mono">${r.trades}</td>
+      <td class="mono ${clsPnl(r.net_pnl)}">${fmtRs(r.net_pnl)}</td>
+      <td class="mono ${r.win_rate>=50?'pos':'neg'}">${r.win_rate}%</td>
+      <td class="mono ${clsPnl(r.avg_ret)}">${r.avg_ret>0?'+':''}${r.avg_ret}%</td>
+      <td class="mono">${r.avg_hold}d</td>
+      <td><button class="btn btn-sm" onclick="openAddModal('${r.symbol}')">+ Add to Bot</button></td>
+    </tr>`;
+  }).join('');
+}
+
+let _addSym = '';
+function openAddModal(sym) {
+  _addSym = sym;
+  document.getElementById('add-sym').textContent = sym;
+  document.getElementById('addBotModal').classList.add('open');
+}
+function closeAddModal() {
+  document.getElementById('addBotModal').classList.remove('open');
+}
+async function confirmAddBot() {
+  const bot = document.getElementById('add-bot-select').value;
+  const res  = await fetch('/api/universe').then(r=>r.json());
+  if (bot === 'nse200') {
+    if (!res.nse200.extra.includes(_addSym)) res.nse200.extra.push(_addSym);
+  } else {
+    if (!res[bot].add.includes(_addSym)) res[bot].add.push(_addSym);
+  }
+  await fetch('/api/universe', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(res)});
+  closeAddModal();
+  toast(`${_addSym} added to ${bot} universe`, 'success');
+}
+
+document.getElementById('addBotModal').addEventListener('click', e => {
+  if (e.target === document.getElementById('addBotModal')) closeAddModal();
+});
+{% endblock %}
