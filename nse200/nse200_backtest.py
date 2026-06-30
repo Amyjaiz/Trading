@@ -152,7 +152,7 @@ def get_universe(script_dir: str, force_refresh: bool = False) -> list:
 # ============================================================================
 # DATA DOWNLOAD  — silent on delisted stocks
 # ============================================================================
-def download_universe(tickers: list, start: str, end: str) -> dict:
+def download_universe(tickers: list, start: str, end: str, min_bars: int = 250) -> dict:
     master, failed = {}, 0
     total = len(tickers)
     print(f"  Downloading {total} stocks... (delisted/unavailable will be skipped silently)")
@@ -161,7 +161,7 @@ def download_universe(tickers: list, start: str, end: str) -> dict:
         try:
             raw = yf.download(ticker, start=start, end=end,
                               progress=False, auto_adjust=True)
-            if raw.empty or len(raw) < 250:
+            if raw.empty or len(raw) < min_bars:
                 failed += 1
                 continue
             if isinstance(raw.columns, pd.MultiIndex):
@@ -196,9 +196,9 @@ def compute_tax(profit: float, entry: pd.Timestamp, exit_: pd.Timestamp) -> floa
     return profit * rate
 
 
-def get_rebalance_dates(master: dict, start: str) -> list:
+def get_rebalance_dates(master: dict, start: str, warmup_months: int = 18) -> list:
     all_dates  = sorted(set(d for df in master.values() for d in df.index))
-    warmup     = pd.Timestamp(start) + pd.DateOffset(months=18)
+    warmup     = pd.Timestamp(start) + pd.DateOffset(months=warmup_months)
     all_dates  = [d for d in all_dates if d >= warmup]
     rebal, seen = [], set()
     for d in all_dates:
@@ -539,19 +539,23 @@ def main():
           f"Capital: Rs {cfg['INITIAL_CAPITAL']:,.0f}  |  Slots: {cfg['TOP_N']}")
     print("=" * 70)
 
+    focused = bool(args.stocks)
+
     # Universe
-    if args.stocks:
+    if focused:
         tickers = [s.upper() + ".NS" if not s.endswith(".NS") else s.upper()
                    for s in args.stocks]
-        # For focused runs, set slots to number of stocks provided
-        cfg["TOP_N"] = len(tickers)
+        # In focused mode only override TOP_N if --slots was not explicitly provided
+        if not args.slots:
+            cfg["TOP_N"] = len(tickers)
         print(f"  Focused mode: {len(tickers)} stocks → {[t.replace('.NS','') for t in tickers]}")
     else:
         tickers = get_universe(script_dir, args.refresh_universe)
 
-    # Download
+    # Download — use relaxed bar minimum for focused single-stock runs
+    min_bars = 60 if focused else 250
     print(f"\n  Downloading price data ({cfg['START_DATE']} → {end_date})...")
-    master = download_universe(tickers, cfg["START_DATE"], end_date)
+    master = download_universe(tickers, cfg["START_DATE"], end_date, min_bars=min_bars)
     if not master:
         print("  ERROR: no data loaded — check your universe or internet connection")
         sys.exit(1)
@@ -568,8 +572,9 @@ def main():
         print(f"  Nifty download failed ({e}) — defaulting to bull regime")
         nifty_bull = pd.Series(True, index=pd.date_range(cfg["START_DATE"], end_date))
 
-    # Rebalance dates
-    rebal = get_rebalance_dates(master, cfg["START_DATE"])
+    # Rebalance dates — use shorter warmup for focused runs
+    warmup_months = 3 if focused else 18
+    rebal = get_rebalance_dates(master, cfg["START_DATE"], warmup_months=warmup_months)
     print(f"  {len(rebal)} monthly rebalance dates | "
           f"{len(master)} stocks with sufficient data")
 
@@ -595,6 +600,24 @@ def main():
         #                  pnl, pnl_pct, held_days, rsi_entry, regime, model
         r["blotter"].to_csv(out, index=False)
         print(f"\nTrade log → {out}")
+        # Save summary metrics for dashboard top bar
+        import json as _json
+        sells = r["blotter"][r["blotter"]["action"] == "SELL"]
+        n = len(sells)
+        wins_sum   = float(sells.loc[sells["pnl"] > 0,  "pnl"].sum()) if n else 0
+        losses_sum = float(sells.loc[sells["pnl"] <= 0, "pnl"].sum()) if n else 0
+        _metrics_out = {
+            "cagr":          round(float(r.get("cagr",   0)), 2),
+            "sharpe":        round(float(r.get("sharpe", 0)), 2),
+            "maxdd":         round(float(r.get("max_dd", 0)), 2),
+            "total_trades":  n,
+            "win_rate":      round(float(r.get("wr", 0)), 1),
+            "profit_factor": round(wins_sum / abs(losses_sum), 2) if losses_sum else 0,
+            "avg_hold":      round(float(sells["held_days"].mean()), 1) if n else 0,
+        }
+        with open(os.path.join(script_dir, "nse200_metrics.json"), "w") as _f:
+            _json.dump(_metrics_out, _f)
+        print(f"Metrics  → nse200_metrics.json")
 
 
 if __name__ == "__main__":

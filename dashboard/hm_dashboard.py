@@ -587,6 +587,14 @@ def api_backtest_run():
     if model not in _BACKTEST_SCRIPTS:
         return jsonify({"status": "error", "message": f"Unknown model: {model}"}), 400
 
+    # Incorporate custom universe adds/removes from custom_universe.json
+    uni = read_custom_universe()
+    model_uni_key = {"hm": "hm", "ts": "triple_screen", "nse": "nse200"}.get(model, model)
+    uni_section   = uni.get(model_uni_key, {})
+    uni_adds      = [s.upper() for s in uni_section.get("add",   [])]
+    uni_removes   = [s.upper() for s in uni_section.get("remove", [])]
+    uni_extra     = [s.upper() for s in uni_section.get("extra",  [])]
+
     lock = _backtest_locks[model]
     with lock:
         proc = _backtest_procs[model]
@@ -597,6 +605,18 @@ def api_backtest_run():
         cmd = ["python", script]
         if stocks:
             cmd += ["--stocks"] + stocks
+            # Still append extra-stocks/exclude from universe config
+            if model == "hm":
+                if uni_adds:    cmd += ["--extra-stocks"] + uni_adds
+                if uni_removes: cmd += ["--exclude"]      + uni_removes
+        else:
+            # No explicit filter — apply universe config
+            if model == "hm":
+                if uni_adds:    cmd += ["--extra-stocks"] + uni_adds
+                if uni_removes: cmd += ["--exclude"]      + uni_removes
+            elif model == "nse" and (uni_extra or uni_adds):
+                extra = list(dict.fromkeys(uni_extra + uni_adds))
+                cmd += ["--stocks"] + extra
         if start:
             cmd += ["--start", start]
         if capital:
@@ -667,6 +687,17 @@ def api_backtest_results(model: str):
     if not path:
         return jsonify({"error": "unknown model"}), 400
     trades = _read_csv_dicts(path)
+    # Load pre-computed summary metrics (CAGR/Sharpe/MaxDD require equity curve)
+    metrics_map = {
+        "hm":  os.path.join(HM_DIR,            "hm_metrics.json"),
+        "nse": os.path.join(NSE200_DIR,        "nse200_metrics.json"),
+    }
+    summary_metrics: dict = {}
+    if model.lower() in metrics_map:
+        summary_metrics = _read_json(metrics_map[model.lower()])
+        if not isinstance(summary_metrics, dict):
+            summary_metrics = {}
+
     per_stock: dict[str, dict] = {}
     for row in trades:
         sym = row.get("symbol", "")
@@ -699,7 +730,10 @@ def api_backtest_results(model: str):
             "avg_ret":  round(s["total_pct"] / t, 2) if t else 0,
             "avg_hold": round(s["hold_days"] / t, 1) if t else 0,
         })
-    return jsonify({"per_stock": result_list, "analytics": _compute_analytics(trades)})
+    analytics = _compute_analytics(trades)
+    # Overlay CAGR/Sharpe/MaxDD from pre-saved metrics file (can't compute from trades log alone)
+    analytics.update({k: summary_metrics[k] for k in ("cagr", "sharpe", "maxdd") if k in summary_metrics})
+    return jsonify({"per_stock": result_list, "analytics": analytics})
 
 # ──────────────────────────────────────────────────────────────
 # API — Universe manager
