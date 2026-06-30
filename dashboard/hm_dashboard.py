@@ -593,12 +593,6 @@ def api_backtest_run():
         if proc and proc.poll() is None:
             return jsonify({"status": "running", "message": f"{model.upper()} backtest already running"})
 
-        if model == "nse" and stocks and len(stocks) < 5:
-            return jsonify({
-                "status": "warning",
-                "message": "NSE200 backtest needs at least 5 stocks for rotation to work.",
-            }), 400
-
         bot_dir, script = _BACKTEST_SCRIPTS[model]
         cmd = ["python", script]
         if stocks:
