@@ -501,9 +501,10 @@ def make_signals(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
 # ============================================================================
 def load_yf(cfg: dict, symbols_override: list | None = None):
     import yfinance as yf
-    exclude = cfg.get("EXCLUDE_SYMBOLS", set())
     symbols = symbols_override if symbols_override is not None else cfg["SYMBOLS"]
-    symbols = [s for s in symbols if s not in exclude]
+    if symbols_override is None:
+        exclude = cfg.get("EXCLUDE_SYMBOLS", set())
+        symbols = [s for s in symbols if s not in exclude]
 
     data = {}
     for sym in symbols:
@@ -1472,6 +1473,10 @@ def main():
                     help="load saved ML model and apply as signal filter")
     ap.add_argument("--threshold",   type=float, default=None,
                     help="override ML_THRESHOLD (e.g. --threshold 0.50)")
+    ap.add_argument("--extra-stocks", nargs="+", default=None,
+                    help="append extra tickers to the full universe (keeps all SYMBOLS + these)")
+    ap.add_argument("--exclude",      nargs="+", default=None,
+                    help="remove specific tickers from the universe (added to EXCLUDE_SYMBOLS)")
     args = ap.parse_args()
     cfg  = dict(CFG)  # copy so we can mutate
 
@@ -1481,6 +1486,9 @@ def main():
         cfg["START"] = args.start
     if args.capital is not None:
         cfg["INITIAL_CAPITAL"] = args.capital
+    if args.exclude:
+        excl = cfg.get("EXCLUDE_SYMBOLS", set())
+        cfg["EXCLUDE_SYMBOLS"] = excl | {s.upper() for s in args.exclude}
 
     # ── DATA LOADING ────────────────────────────────────────────────────────
     if args.synthetic:
@@ -1493,6 +1501,11 @@ def main():
         print(f"[stocks] focused backtest: {syms}")
         data, idx = load_yf(cfg, symbols_override=syms)
         train_data = data
+        if args.extra_stocks:
+            extra = [s.upper() for s in args.extra_stocks]
+            extra_data, _ = load_yf(cfg, symbols_override=extra)
+            data = {**data, **extra_data}
+            train_data = data
     elif args.train:
         # Training uses the full dirty universe = SYMBOLS + ML_TRAINING_EXTRA
         extra = cfg.get("ML_TRAINING_EXTRA", [])
@@ -1512,6 +1525,12 @@ def main():
               f"({len(exclude)} excluded) …")
         data, idx = load_yf(cfg)
         train_data = data
+        if args.extra_stocks:
+            extra = [s.upper() for s in args.extra_stocks]
+            print(f"[extra-stocks] appending {extra} to universe …")
+            extra_data, _ = load_yf(cfg, symbols_override=extra)
+            data = {**data, **extra_data}
+            train_data = data
     print(f"Loaded {len(data)} symbols\n")
 
     # ── TRAIN MODE ──────────────────────────────────────────────────────────
@@ -1620,13 +1639,39 @@ def main():
         run_pyramid_sweep(data, idx, cfg)
     else:
         trades, eq, idx2 = backtest(data, idx, cfg, ml_model=ml_model)
-        report(trades, eq, idx2, cfg, verbose=True)
+        metrics = report(trades, eq, idx2, cfg, verbose=True)
         if not trades.empty:
             out = "hm_trades.csv"
-            # Add model column for dashboard compatibility
-            trades["model"] = "HM"
+            # Standard dashboard-compatible columns (all models use same schema)
+            trades["date"]      = pd.to_datetime(trades["exit"]).dt.date.astype(str)
+            trades["action"]    = "SELL"
+            trades["pnl"]       = trades["net_pnl"].round(2)
+            trades["pnl_pct"]   = trades["ret_pct"].round(2)
+            trades["held_days"] = trades["hold"].astype(int)
+            trades["qty"]       = trades["shares"].round(4)
+            trades["price"]     = trades["exit_px"].round(2)
+            trades["model"]     = "HM"
             trades.to_csv(out, index=False)
             print(f"\nTrade log → {out}")
+            # Save summary metrics for dashboard top bar
+            if metrics:
+                n = len(trades)
+                wins = int((trades["net_pnl"] > 0).sum())
+                losses_sum = float(trades.loc[trades["net_pnl"] <= 0, "net_pnl"].sum())
+                wins_sum   = float(trades.loc[trades["net_pnl"] > 0,  "net_pnl"].sum())
+                import json as _json
+                _json_out = {
+                    "cagr":          round(float(metrics.get("cagr", 0)) * 100, 2),
+                    "sharpe":        round(float(metrics.get("sharpe", 0)), 2),
+                    "maxdd":         round(float(metrics.get("dd", 0)) * 100, 2),
+                    "total_trades":  n,
+                    "win_rate":      round(100 * wins / n, 1) if n else 0,
+                    "profit_factor": round(wins_sum / abs(losses_sum), 2) if losses_sum else 0,
+                    "avg_hold":      round(float(trades["hold"].mean()), 1) if n else 0,
+                }
+                with open("hm_metrics.json", "w") as _f:
+                    _json.dump(_json_out, _f)
+                print(f"Metrics  → hm_metrics.json")
 
 
 if __name__ == "__main__":
