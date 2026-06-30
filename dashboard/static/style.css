@@ -20,7 +20,7 @@
 
 html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--font-ui); font-size: 14px; }
 
-/* ── Sidebar ── */
+/* -- Sidebar -- */
 .sidebar {
   position: fixed; top: 0; left: 0; bottom: 0;
   width: var(--sidebar-w); background: var(--surface);
@@ -50,13 +50,13 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .sidebar-footer a { color: var(--muted); text-decoration: none; font-size: 12px; }
 .sidebar-footer a:hover { color: var(--red); }
 
-/* ── Main content ── */
+/* -- Main content -- */
 .content { margin-left: var(--sidebar-w); padding: 24px; min-height: 100vh; }
 .page-header { margin-bottom: 24px; }
 .page-header h1 { font-size: 20px; font-weight: 600; color: var(--text); }
 .page-header p  { color: var(--muted); font-size: 13px; margin-top: 4px; }
 
-/* ── KPI cards ── */
+/* -- KPI cards -- */
 .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 24px; }
 .kpi-card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
 .kpi-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; margin-bottom: 6px; }
@@ -66,7 +66,7 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .kpi-value.accent   { color: var(--accent); }
 .kpi-sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
 
-/* ── Bot health cards ── */
+/* -- Bot health cards -- */
 .bot-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 24px; }
 .bot-card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
 .bot-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
@@ -78,7 +78,7 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .bot-lag { font-size: 11px; color: var(--muted); }
 .bot-log { font-family: var(--font-mono); font-size: 11px; color: var(--muted); line-height: 1.5; overflow: hidden; }
 
-/* ── Tables ── */
+/* -- Tables -- */
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 thead th { padding: 10px 12px; text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); border-bottom: 1px solid var(--border); white-space: nowrap; }
@@ -96,13 +96,13 @@ tbody tr:hover { background: rgba(255,255,255,.02); }
 .tag-sim { background: rgba(248,81,73,.15);  color: var(--red); }
 .drag-tag { font-size: 10px; font-weight: 700; color: var(--red); }
 
-/* ── Cards / sections ── */
+/* -- Cards / sections -- */
 .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin-bottom: 16px; }
 .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
 .card-title { font-weight: 600; font-size: 14px; }
 .section-divider { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
 
-/* ── Buttons ── */
+/* -- Buttons -- */
 .btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); font-size: 12px; font-weight: 500; cursor: pointer; text-decoration: none; transition: all .15s; }
 .btn:hover { border-color: var(--muted); background: var(--card); }
 .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
@@ -116,7 +116,7 @@ tbody tr:hover { background: rgba(255,255,255,.02); }
 .btn-sell:hover { background: var(--red);   color: #fff; }
 .btn[disabled]  { opacity: .4; cursor: not-allowed; }
 
-/* ── Filters bar ── */
+/* -- Filters bar -- */
 .filter-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 16px; }
 .filter-bar select, .filter-bar input[type=text], .filter-bar input[type=date] {
   padding: 7px 10px; background: var(--surface); border: 1px solid var(--border);
@@ -127,7 +127,7 @@ tbody tr:hover { background: rgba(255,255,255,.02); }
 .period-btn { padding: 5px 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 5px; color: var(--muted); font-size: 11px; font-weight: 600; cursor: pointer; }
 .period-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 
-/* ── Modal ── */
+/* -- Modal -- */
 .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.7); z-index: 200; align-items: center; justify-content: center; }
 .modal-overlay.open { display: flex; }
 .modal { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 24px; width: 360px; max-width: 95vw; }
@@ -140,14 +140,14 @@ tbody tr:hover { background: rgba(255,255,255,.02); }
 .modal-actions .btn { flex: 1; justify-content: center; }
 .modal-sim-badge { background: rgba(248,81,73,.1); border: 1px solid var(--red); color: var(--red); border-radius: 6px; padding: 8px 12px; font-size: 12px; margin-bottom: 14px; text-align: center; }
 
-/* ── Sparkline canvas ── */
+/* -- Sparkline canvas -- */
 .sparkline-cell { width: 100px; }
 .sparkline-cell canvas { display: block; }
 
-/* ── Win rate badge ── */
+/* -- Win rate badge -- */
 .wr-badge { font-size: 11px; font-family: var(--font-mono); color: var(--muted); white-space: nowrap; }
 
-/* ── Backtest ── */
+/* -- Backtest -- */
 .bt-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
 .bt-tab { padding: 10px 20px; font-size: 13px; cursor: pointer; border-bottom: 2px solid transparent; color: var(--muted); user-select: none; }
 .bt-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
@@ -171,7 +171,7 @@ tbody tr:hover { background: rgba(255,255,255,.02); }
 .bt-metric-label { font-size: 10px; color: var(--muted); text-transform: uppercase; }
 .bt-metric-value { font-size: 16px; font-weight: 700; font-family: var(--font-mono); margin-top: 2px; }
 
-/* ── Universe manager ── */
+/* -- Universe manager -- */
 .uni-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
 .uni-tab  { padding: 10px 20px; font-size: 13px; cursor: pointer; border-bottom: 2px solid transparent; color: var(--muted); }
 .uni-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
@@ -184,7 +184,7 @@ tbody tr:hover { background: rgba(255,255,255,.02); }
 .stock-chip button { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 16px; }
 .pending-badge { display: inline-block; padding: 2px 6px; background: rgba(210,153,34,.15); border: 1px solid var(--amber); color: var(--amber); border-radius: 4px; font-size: 10px; font-weight: 700; margin-left: 6px; }
 
-/* ── Logs ── */
+/* -- Logs -- */
 .log-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 .log-panel { background: var(--card); border: 1px solid var(--border); border-radius: 8px; }
 .log-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border); }
@@ -201,7 +201,7 @@ tbody tr:hover { background: rgba(255,255,255,.02); }
 .log-line.other { color: #5a6474; }
 .log-footer { display: flex; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border); }
 
-/* ── Login page ── */
+/* -- Login page -- */
 .login-wrap { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
 .login-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 40px; width: 360px; }
 .login-logo { text-align: center; margin-bottom: 24px; }
@@ -215,7 +215,7 @@ tbody tr:hover { background: rgba(255,255,255,.02); }
 .login-submit { width: 100%; padding: 11px; background: var(--accent); border: none; border-radius: 6px; color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 4px; }
 .login-submit:hover { background: #00a883; }
 
-/* ── Toast ── */
+/* -- Toast -- */
 #toast { position: fixed; bottom: 24px; right: 24px; z-index: 999; display: flex; flex-direction: column; gap: 8px; }
 .toast-msg { padding: 12px 18px; border-radius: 8px; font-size: 13px; min-width: 220px; animation: toast-in .2s ease; }
 .toast-msg.success { background: var(--green);  color: #fff; }
@@ -223,12 +223,12 @@ tbody tr:hover { background: rgba(255,255,255,.02); }
 .toast-msg.warn    { background: var(--amber);  color: #000; }
 @keyframes toast-in { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
 
-/* ── Pagination ── */
+/* -- Pagination -- */
 .pagination { display: flex; gap: 6px; align-items: center; justify-content: flex-end; margin-top: 16px; }
 .page-btn { padding: 5px 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 5px; color: var(--muted); font-size: 12px; cursor: pointer; }
 .page-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 
-/* ── Util ── */
+/* -- Util -- */
 .flex { display: flex; }
 .items-center { align-items: center; }
 .gap-8 { gap: 8px; }
@@ -239,6 +239,39 @@ tbody tr:hover { background: rgba(255,255,255,.02); }
 .text-sm { font-size: 12px; }
 .loading { color: var(--muted); text-align: center; padding: 40px; font-size: 13px; }
 .empty { color: var(--muted); font-size: 13px; padding: 20px 0; text-align: center; }
+
+/* -- Backtest: per-model status badges -- */
+.bt-status-badge  { display: inline-block; padding: 2px 7px; border-radius: 10px; font-size: 10px; font-weight: 700; margin-left: 8px; text-transform: uppercase; letter-spacing: .3px; vertical-align: middle; }
+.status-idle      { background: rgba(139,148,158,.15); color: var(--muted); }
+.status-running   { background: rgba(0,184,148,.15);   color: var(--accent); animation: status-blink 1.4s infinite; }
+.status-completed { background: rgba(63,185,80,.15);   color: var(--green); }
+.status-failed    { background: rgba(248,81,73,.15);   color: var(--red); }
+@keyframes status-blink { 0%,100%{opacity:1}50%{opacity:.5} }
+
+/* -- Backtest: universe management -- */
+.bt-universe-section { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+.bt-section-header   { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.bt-section-title    { font-weight: 600; font-size: 14px; }
+.bt-section-label    { font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+.uni-cols  { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.uni-col   { display: flex; flex-direction: column; gap: 10px; }
+.uni-col-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; }
+.chip-list { display: flex; flex-wrap: wrap; gap: 6px; min-height: 32px; align-items: flex-start; }
+.uni-chip  { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-family: var(--font-mono); background: rgba(88,166,255,.1); border: 1px solid rgba(88,166,255,.3); color: var(--blue); }
+.uni-chip button { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 14px; line-height: 1; padding: 0; margin-left: 2px; }
+.uni-input-row { display: flex; gap: 6px; align-items: center; }
+.uni-symbol-input { padding: 6px 10px; background: var(--card); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-family: var(--font-mono); font-size: 12px; width: 120px; outline: none; }
+.uni-symbol-input:focus { border-color: var(--accent); }
+.btn-danger-outline { background: rgba(248,81,73,.08); border-color: var(--red); color: var(--red); }
+.btn-danger-outline:hover { background: var(--red); color: #fff; }
+
+/* -- Backtest: stock filter row -- */
+.stock-filter-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 8px 0 0; }
+.stock-filter-input { padding: 5px 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-family: var(--font-mono); font-size: 12px; width: 130px; outline: none; }
+.stock-filter-input:focus { border-color: var(--accent); }
+
+/* -- Backtest: results section -- */
+.bt-results-section { margin-top: 8px; }
 
 @media (max-width: 900px) {
   .bot-cards  { grid-template-columns: 1fr; }

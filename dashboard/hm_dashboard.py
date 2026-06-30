@@ -46,8 +46,9 @@ app = Flask(__name__, template_folder="templates", static_folder="static")
 app.secret_key = os.urandom(32)   # sessions invalidated on restart (intentional)
 socketio = SocketIO(app, async_mode="threading", cors_allowed_origins="*")
 
-_backtest_proc: subprocess.Popen | None = None
-_backtest_lock = Lock()
+_backtest_procs:  dict[str, subprocess.Popen | None] = {"hm": None, "ts": None, "nse": None}
+_backtest_status: dict[str, str]                     = {"hm": "idle", "ts": "idle", "nse": "idle"}
+_backtest_locks:  dict[str, Lock]                    = {"hm": Lock(), "ts": Lock(), "nse": Lock()}
 
 # ──────────────────────────────────────────────────────────────
 # Auth helpers
@@ -565,7 +566,7 @@ def api_order():
     return jsonify(result)
 
 # ──────────────────────────────────────────────────────────────
-# API — Backtest subprocess
+# API — Backtest subprocess (per-model concurrent execution)
 # ──────────────────────────────────────────────────────────────
 _BACKTEST_SCRIPTS = {
     "hm":  (HM_DIR,            "hm_backtest.py"),
@@ -576,20 +577,21 @@ _BACKTEST_SCRIPTS = {
 @app.route("/api/backtest/run", methods=["POST"])
 @login_required
 def api_backtest_run():
-    global _backtest_proc
-    with _backtest_lock:
-        if _backtest_proc and _backtest_proc.poll() is None:
-            return jsonify({"status": "running", "message": "Backtest already running"})
+    data    = request.get_json(force=True)
+    model   = str(data.get("model", "hm")).lower()
+    stocks  = [str(s).upper() for s in data.get("stocks", [])]
+    start   = str(data.get("start", ""))
+    capital = str(data.get("capital", ""))
+    flags   = [str(f) for f in data.get("flags", [])]
 
-        data    = request.get_json(force=True)
-        model   = str(data.get("model", "hm")).lower()
-        stocks  = [str(s).upper() for s in data.get("stocks", [])]
-        start   = str(data.get("start", ""))
-        capital = str(data.get("capital", ""))
-        flags   = [str(f) for f in data.get("flags", [])]
+    if model not in _BACKTEST_SCRIPTS:
+        return jsonify({"status": "error", "message": f"Unknown model: {model}"}), 400
 
-        if model not in _BACKTEST_SCRIPTS:
-            return jsonify({"status": "error", "message": f"Unknown model: {model}"}), 400
+    lock = _backtest_locks[model]
+    with lock:
+        proc = _backtest_procs[model]
+        if proc and proc.poll() is None:
+            return jsonify({"status": "running", "message": f"{model.upper()} backtest already running"})
 
         if model == "nse" and stocks and len(stocks) < 5:
             return jsonify({
@@ -607,38 +609,57 @@ def api_backtest_run():
             cmd += ["--capital", capital]
         cmd += flags
 
-        _backtest_proc = subprocess.Popen(
+        env  = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
+        proc = subprocess.Popen(
             cmd, cwd=bot_dir,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, bufsize=1,
+            text=True, bufsize=1, env=env,
         )
+        _backtest_procs[model]  = proc
+        _backtest_status[model] = "running"
 
-        def _stream():
-            assert _backtest_proc is not None
-            for line in _backtest_proc.stdout:
-                socketio.emit("backtest_output", {"line": line.rstrip()})
-            _backtest_proc.wait()
-            socketio.emit("backtest_done", {"returncode": _backtest_proc.returncode, "model": model})
+    def _stream(m: str, p: subprocess.Popen) -> None:
+        for line in p.stdout:
+            socketio.emit("backtest_output", {"model": m, "line": line.rstrip()})
+        p.wait()
+        with _backtest_locks[m]:
+            _backtest_status[m] = "completed" if p.returncode == 0 else "failed"
+        socketio.emit("backtest_done", {"model": m, "returncode": p.returncode})
 
-        Thread(target=_stream, daemon=True).start()
-        return jsonify({"status": "started"})
+    Thread(target=_stream, args=(model, proc), daemon=True).start()
+    return jsonify({"status": "started"})
 
 @app.route("/api/backtest/cancel", methods=["POST"])
 @login_required
 def api_backtest_cancel():
-    global _backtest_proc
-    with _backtest_lock:
-        if _backtest_proc and _backtest_proc.poll() is None:
-            _backtest_proc.terminate()
-            return jsonify({"status": "cancelled"})
+    data  = request.get_json(force=True) or {}
+    model = str(data.get("model", "")).lower()
+    models_to_cancel = [model] if model in _backtest_locks else list(_backtest_locks.keys())
+    cancelled = []
+    for m in models_to_cancel:
+        with _backtest_locks[m]:
+            proc = _backtest_procs[m]
+            if proc and proc.poll() is None:
+                proc.terminate()
+                _backtest_status[m] = "idle"
+                cancelled.append(m)
+    if cancelled:
+        return jsonify({"status": "cancelled", "models": cancelled})
     return jsonify({"status": "not_running"})
 
 @app.route("/api/backtest/status")
 @login_required
 def api_backtest_status():
-    with _backtest_lock:
-        running = _backtest_proc is not None and _backtest_proc.poll() is None
-    return jsonify({"running": running})
+    result = {}
+    for m, lock in _backtest_locks.items():
+        with lock:
+            proc    = _backtest_procs[m]
+            running = proc is not None and proc.poll() is None
+            result[m] = {
+                "running": running,
+                "status":  "running" if running else _backtest_status[m],
+            }
+    return jsonify(result)
 
 @app.route("/api/backtest/results/<model>")
 @login_required

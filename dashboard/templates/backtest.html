@@ -4,20 +4,27 @@
 {% block content %}
 <div class="page-header">
   <h1>Backtest</h1>
-  <p>Run backtests from the browser — output streams live</p>
+  <p>Run backtests for all three models concurrently &mdash; output streams live per model</p>
 </div>
 
 <div class="bt-tabs">
-  <div class="bt-tab active" data-model="hm"  onclick="switchModel('hm')">Hilega Milega</div>
-  <div class="bt-tab"        data-model="ts"  onclick="switchModel('ts')">Triple Screen</div>
-  <div class="bt-tab"        data-model="nse" onclick="switchModel('nse')">NSE200 Momentum</div>
+  <div class="bt-tab active" data-model="hm"  onclick="switchModel('hm')">
+    Hilega Milega <span class="bt-status-badge status-idle" id="badge-hm">idle</span>
+  </div>
+  <div class="bt-tab" data-model="ts"  onclick="switchModel('ts')">
+    Triple Screen <span class="bt-status-badge status-idle" id="badge-ts">idle</span>
+  </div>
+  <div class="bt-tab" data-model="nse" onclick="switchModel('nse')">
+    NSE200 Momentum <span class="bt-status-badge status-idle" id="badge-nse">idle</span>
+  </div>
 </div>
 
+<!-- HM Panel -->
 <div class="bt-panel active" id="panel-hm">
   <div class="bt-controls">
     <div class="bt-controls-row">
       <div class="bt-field"><label>Start Date</label><input type="date" id="hm-start" value="2024-01-01"></div>
-      <div class="bt-field"><label>Capital (₹)</label><input type="number" id="hm-capital" value="100000" step="10000"></div>
+      <div class="bt-field"><label>Capital (&#8377;)</label><input type="number" id="hm-capital" value="100000" step="10000"></div>
       <div class="bt-field"><label>Exit Mode</label>
         <select id="hm-exit">
           <option value="">Default (rsi50_and_vwap)</option>
@@ -28,26 +35,86 @@
         <select id="hm-ml"><option value="">Off</option><option value="--ml">On</option></select>
       </div>
     </div>
-    <div style="margin-bottom:8px">
-      <label class="text-muted text-sm">Stock filter (blank = full 213-stock universe):</label>
-      <div class="flex gap-8" style="margin-top:8px;flex-wrap:wrap;align-items:center">
-        <div class="stock-tags" id="hm-stock-tags"></div>
-        <input type="text" id="hm-stock-input" placeholder="e.g. CGPOWER" style="width:130px;padding:5px 8px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--font-mono);font-size:12px" onkeydown="addStock(event,'hm')">
-      </div>
+    <div class="bt-section-label">Stock filter for this run (blank = full 213-stock universe):</div>
+    <div class="stock-filter-row">
+      <div class="stock-tags" id="hm-stock-tags"></div>
+      <input type="text" id="hm-stock-input" placeholder="e.g. CGPOWER" class="stock-filter-input"
+             onkeydown="addFilterStock(event,'hm')">
     </div>
-    <div class="flex gap-8">
+    <div class="flex gap-8" style="margin-top:12px">
       <button class="btn btn-primary" id="hm-run" onclick="runBacktest('hm')">&#9654; Run Backtest</button>
       <button class="btn" onclick="runBacktest('hm',true)">&#9889; Run Sweep</button>
-      <button class="btn btn-danger" id="hm-cancel" style="display:none" onclick="cancelBacktest()">&#10005; Cancel</button>
+      <button class="btn btn-danger" id="hm-cancel" style="display:none" onclick="cancelBacktest('hm')">&#10005; Cancel</button>
+    </div>
+  </div>
+
+  <div class="progress-bar-wrap" id="progress-hm"><div class="progress-bar"></div></div>
+  <pre class="bt-terminal hidden" id="bt-terminal-hm"></pre>
+
+  <div class="bt-universe-section">
+    <div class="bt-section-header">
+      <span class="bt-section-title">Universe Management &mdash; Hilega Milega</span>
+      <span class="text-muted text-sm">Changes update custom_universe.json instantly</span>
+    </div>
+    <div class="uni-cols">
+      <div class="uni-col">
+        <div class="uni-col-label pos">+ Added to Universe</div>
+        <div class="chip-list" id="hm-uni-add"></div>
+        <div class="uni-input-row">
+          <input type="text" id="hm-uni-add-input" placeholder="SYMBOL" class="uni-symbol-input"
+                 onkeydown="addUniverseStock(event,'hm','add')">
+          <button class="btn btn-sm" onclick="addUniverseStockBtn('hm','add')">+ Add</button>
+        </div>
+      </div>
+      <div class="uni-col">
+        <div class="uni-col-label neg">&#8722; Removed from Universe</div>
+        <div class="chip-list" id="hm-uni-remove"></div>
+        <div class="uni-input-row">
+          <input type="text" id="hm-uni-remove-input" placeholder="SYMBOL" class="uni-symbol-input"
+                 onkeydown="addUniverseStock(event,'hm','remove')">
+          <button class="btn btn-sm btn-danger-outline" onclick="addUniverseStockBtn('hm','remove')">&#8722; Remove</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bt-results-section" id="results-hm" style="display:none">
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Backtest Results &mdash; Hilega Milega</span>
+        <button class="btn btn-sm" onclick="loadResults('hm')">&#8635; Reload</button>
+      </div>
+      <div class="bt-metrics" id="bt-metrics-hm"></div>
+      <hr class="section-divider">
+      <div class="filter-bar">
+        <span class="filter-label">Filter:</span>
+        <input type="number" id="hm-min-wr" placeholder="Min WR%" style="width:90px" oninput="filterResults('hm')">
+        <input type="number" id="hm-min-trades" placeholder="Min trades" style="width:90px" oninput="filterResults('hm')">
+        <input type="text" id="hm-sym-search" placeholder="Symbol search" style="width:120px" oninput="filterResults('hm')">
+        <select id="hm-sort" onchange="filterResults('hm')">
+          <option value="net_pnl">Sort: Net P&amp;L</option>
+          <option value="win_rate">Sort: Win Rate</option>
+          <option value="avg_ret">Sort: Avg Return</option>
+          <option value="trades">Sort: Trades</option>
+        </select>
+        <button class="btn btn-sm" onclick="filterResults('hm')">Apply</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Symbol</th><th>Trades</th><th>Net P&amp;L</th><th>Win Rate</th><th>Avg Ret%</th><th>Avg Hold</th><th></th></tr></thead>
+          <tbody id="results-body-hm"></tbody>
+        </table>
+      </div>
     </div>
   </div>
 </div>
 
+<!-- TS Panel -->
 <div class="bt-panel" id="panel-ts">
   <div class="bt-controls">
     <div class="bt-controls-row">
       <div class="bt-field"><label>Start Date</label><input type="date" id="ts-start" value="2022-01-01"></div>
-      <div class="bt-field"><label>Capital (₹)</label><input type="number" id="ts-capital" value="500000" step="10000"></div>
+      <div class="bt-field"><label>Capital (&#8377;)</label><input type="number" id="ts-capital" value="500000" step="10000"></div>
       <div class="bt-field"><label>Trigger Mode</label>
         <select id="ts-trigger">
           <option value="">Per-stock best trigger</option>
@@ -55,21 +122,81 @@
         </select>
       </div>
     </div>
-    <div style="margin-bottom:8px">
-      <label class="text-muted text-sm">Stock filter (blank = full 313-stock universe):</label>
-      <div class="flex gap-8" style="margin-top:8px;flex-wrap:wrap;align-items:center">
-        <div class="stock-tags" id="ts-stock-tags"></div>
-        <input type="text" id="ts-stock-input" placeholder="e.g. IIFL" style="width:130px;padding:5px 8px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--font-mono);font-size:12px" onkeydown="addStock(event,'ts')">
-      </div>
+    <div class="bt-section-label">Stock filter for this run (blank = full 313-stock universe):</div>
+    <div class="stock-filter-row">
+      <div class="stock-tags" id="ts-stock-tags"></div>
+      <input type="text" id="ts-stock-input" placeholder="e.g. IIFL" class="stock-filter-input"
+             onkeydown="addFilterStock(event,'ts')">
     </div>
-    <div class="flex gap-8">
+    <div class="flex gap-8" style="margin-top:12px">
       <button class="btn btn-primary" id="ts-run" onclick="runBacktest('ts')">&#9654; Run Backtest</button>
       <button class="btn" onclick="runBacktest('ts',true)">&#9889; Run Sweep</button>
-      <button class="btn btn-danger" id="ts-cancel" style="display:none" onclick="cancelBacktest()">&#10005; Cancel</button>
+      <button class="btn btn-danger" id="ts-cancel" style="display:none" onclick="cancelBacktest('ts')">&#10005; Cancel</button>
+    </div>
+  </div>
+
+  <div class="progress-bar-wrap" id="progress-ts"><div class="progress-bar"></div></div>
+  <pre class="bt-terminal hidden" id="bt-terminal-ts"></pre>
+
+  <div class="bt-universe-section">
+    <div class="bt-section-header">
+      <span class="bt-section-title">Universe Management &mdash; Triple Screen</span>
+      <span class="text-muted text-sm">Changes update custom_universe.json instantly</span>
+    </div>
+    <div class="uni-cols">
+      <div class="uni-col">
+        <div class="uni-col-label pos">+ Added to Universe</div>
+        <div class="chip-list" id="ts-uni-add"></div>
+        <div class="uni-input-row">
+          <input type="text" id="ts-uni-add-input" placeholder="SYMBOL" class="uni-symbol-input"
+                 onkeydown="addUniverseStock(event,'ts','add')">
+          <button class="btn btn-sm" onclick="addUniverseStockBtn('ts','add')">+ Add</button>
+        </div>
+      </div>
+      <div class="uni-col">
+        <div class="uni-col-label neg">&#8722; Removed from Universe</div>
+        <div class="chip-list" id="ts-uni-remove"></div>
+        <div class="uni-input-row">
+          <input type="text" id="ts-uni-remove-input" placeholder="SYMBOL" class="uni-symbol-input"
+                 onkeydown="addUniverseStock(event,'ts','remove')">
+          <button class="btn btn-sm btn-danger-outline" onclick="addUniverseStockBtn('ts','remove')">&#8722; Remove</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bt-results-section" id="results-ts" style="display:none">
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Backtest Results &mdash; Triple Screen</span>
+        <button class="btn btn-sm" onclick="loadResults('ts')">&#8635; Reload</button>
+      </div>
+      <div class="bt-metrics" id="bt-metrics-ts"></div>
+      <hr class="section-divider">
+      <div class="filter-bar">
+        <span class="filter-label">Filter:</span>
+        <input type="number" id="ts-min-wr" placeholder="Min WR%" style="width:90px" oninput="filterResults('ts')">
+        <input type="number" id="ts-min-trades" placeholder="Min trades" style="width:90px" oninput="filterResults('ts')">
+        <input type="text" id="ts-sym-search" placeholder="Symbol search" style="width:120px" oninput="filterResults('ts')">
+        <select id="ts-sort" onchange="filterResults('ts')">
+          <option value="net_pnl">Sort: Net P&amp;L</option>
+          <option value="win_rate">Sort: Win Rate</option>
+          <option value="avg_ret">Sort: Avg Return</option>
+          <option value="trades">Sort: Trades</option>
+        </select>
+        <button class="btn btn-sm" onclick="filterResults('ts')">Apply</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Symbol</th><th>Trades</th><th>Net P&amp;L</th><th>Win Rate</th><th>Avg Ret%</th><th>Avg Hold</th><th></th></tr></thead>
+          <tbody id="results-body-ts"></tbody>
+        </table>
+      </div>
     </div>
   </div>
 </div>
 
+<!-- NSE Panel -->
 <div class="bt-panel" id="panel-nse">
   <div class="bt-controls">
     <div class="bt-controls-row">
@@ -88,53 +215,72 @@
         </select>
       </div>
     </div>
-    <div style="margin-bottom:8px">
-      <label class="text-muted text-sm">Stock filter — needs ≥5 stocks for rotation:</label>
-      <div class="flex gap-8" style="margin-top:8px;flex-wrap:wrap;align-items:center">
-        <div class="stock-tags" id="nse-stock-tags"></div>
-        <input type="text" id="nse-stock-input" placeholder="e.g. RELIANCE" style="width:130px;padding:5px 8px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--font-mono);font-size:12px" onkeydown="addStock(event,'nse')">
-      </div>
+    <div class="bt-section-label">Stock filter &mdash; needs &ge;5 stocks for rotation:</div>
+    <div class="stock-filter-row">
+      <div class="stock-tags" id="nse-stock-tags"></div>
+      <input type="text" id="nse-stock-input" placeholder="e.g. RELIANCE" class="stock-filter-input"
+             onkeydown="addFilterStock(event,'nse')">
     </div>
-    <div class="flex gap-8">
+    <div class="flex gap-8" style="margin-top:12px">
       <button class="btn btn-primary" id="nse-run" onclick="runBacktest('nse')">&#9654; Run Backtest</button>
       <button class="btn" onclick="runBacktest('nse',true)">&#9889; Run Sweep</button>
-      <button class="btn btn-danger" id="nse-cancel" style="display:none" onclick="cancelBacktest()">&#10005; Cancel</button>
+      <button class="btn btn-danger" id="nse-cancel" style="display:none" onclick="cancelBacktest('nse')">&#10005; Cancel</button>
+    </div>
+  </div>
+
+  <div class="progress-bar-wrap" id="progress-nse"><div class="progress-bar"></div></div>
+  <pre class="bt-terminal hidden" id="bt-terminal-nse"></pre>
+
+  <div class="bt-universe-section">
+    <div class="bt-section-header">
+      <span class="bt-section-title">Universe Management &mdash; NSE200 Momentum</span>
+      <span class="text-muted text-sm">Extra stocks appended to the NSE200 rotation universe</span>
+    </div>
+    <div class="uni-cols" style="grid-template-columns:1fr">
+      <div class="uni-col">
+        <div class="uni-col-label pos">+ Extra Stocks in Universe</div>
+        <div class="chip-list" id="nse-uni-extra"></div>
+        <div class="uni-input-row">
+          <input type="text" id="nse-uni-extra-input" placeholder="SYMBOL" class="uni-symbol-input"
+                 onkeydown="addUniverseStock(event,'nse','extra')">
+          <button class="btn btn-sm" onclick="addUniverseStockBtn('nse','extra')">+ Add</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bt-results-section" id="results-nse" style="display:none">
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Backtest Results &mdash; NSE200 Momentum</span>
+        <button class="btn btn-sm" onclick="loadResults('nse')">&#8635; Reload</button>
+      </div>
+      <div class="bt-metrics" id="bt-metrics-nse"></div>
+      <hr class="section-divider">
+      <div class="filter-bar">
+        <span class="filter-label">Filter:</span>
+        <input type="number" id="nse-min-wr" placeholder="Min WR%" style="width:90px" oninput="filterResults('nse')">
+        <input type="number" id="nse-min-trades" placeholder="Min trades" style="width:90px" oninput="filterResults('nse')">
+        <input type="text" id="nse-sym-search" placeholder="Symbol search" style="width:120px" oninput="filterResults('nse')">
+        <select id="nse-sort" onchange="filterResults('nse')">
+          <option value="net_pnl">Sort: Net P&amp;L</option>
+          <option value="win_rate">Sort: Win Rate</option>
+          <option value="avg_ret">Sort: Avg Return</option>
+          <option value="trades">Sort: Trades</option>
+        </select>
+        <button class="btn btn-sm" onclick="filterResults('nse')">Apply</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Symbol</th><th>Trades</th><th>Net P&amp;L</th><th>Win Rate</th><th>Avg Ret%</th><th>Avg Hold</th><th></th></tr></thead>
+          <tbody id="results-body-nse"></tbody>
+        </table>
+      </div>
     </div>
   </div>
 </div>
 
-<div class="progress-bar-wrap" id="progress-wrap"><div class="progress-bar" id="progress-bar"></div></div>
-<div class="bt-terminal hidden" id="bt-terminal"></div>
-
-<div id="bt-results" style="display:none">
-  <div class="card">
-    <div class="card-header">
-      <span class="card-title">Results</span>
-      <button class="btn btn-sm" onclick="loadResults()">⟳ Reload</button>
-    </div>
-    <div class="bt-metrics" id="bt-metrics"></div>
-    <hr class="section-divider">
-    <div class="filter-bar">
-      <span class="filter-label">Filter:</span>
-      <input type="number" id="res-min-wr" placeholder="Min WR%" style="width:90px">
-      <input type="number" id="res-min-trades" placeholder="Min trades" style="width:90px">
-      <select id="res-sort" onchange="sortResults()">
-        <option value="net_pnl">Sort: Net P&L</option>
-        <option value="win_rate">Sort: Win Rate</option>
-        <option value="avg_ret">Sort: Avg Return</option>
-        <option value="trades">Sort: Trades</option>
-      </select>
-      <button class="btn btn-sm" onclick="filterResults()">Apply</button>
-    </div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>Symbol</th><th>Trades</th><th>Net P&L</th><th>Win Rate</th><th>Avg Ret%</th><th>Avg Hold</th><th></th></tr></thead>
-        <tbody id="results-body"></tbody>
-      </table>
-    </div>
-  </div>
-</div>
-
+<!-- Add to Bot modal -->
 <div class="modal-overlay" id="addBotModal">
   <div class="modal">
     <h3>Add to Bot Universe</h3>
@@ -157,8 +303,15 @@
 
 {% block scripts %}
 let _currentModel = 'hm';
-let _stockLists   = {hm: [], ts: [], nse: []};
-let _allResults   = [];
+let _filterStocks = {hm: [], ts: [], nse: []};
+let _allResults   = {hm: [], ts: [], nse: []};
+let _universe     = null;
+
+const UNI_KEYS = {
+  hm:  {bot: 'hm',            type: 'add_remove'},
+  ts:  {bot: 'triple_screen', type: 'add_remove'},
+  nse: {bot: 'nse200',        type: 'extra'},
+};
 
 function switchModel(m) {
   _currentModel = m;
@@ -166,40 +319,113 @@ function switchModel(m) {
   document.querySelectorAll('.bt-panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + m));
 }
 
-function addStock(e, model) {
+function addFilterStock(e, model) {
   if (e.key !== 'Enter') return;
   const input = document.getElementById(model + '-stock-input');
   const sym = input.value.trim().toUpperCase();
   if (!sym) return;
-  if (!_stockLists[model].includes(sym)) {
-    _stockLists[model].push(sym);
-    renderStockTags(model);
+  if (!_filterStocks[model].includes(sym)) {
+    _filterStocks[model].push(sym);
+    renderFilterTags(model);
   }
   input.value = '';
 }
 
-function removeStock(model, sym) {
-  _stockLists[model] = _stockLists[model].filter(s => s !== sym);
-  renderStockTags(model);
+function removeFilterStock(model, sym) {
+  _filterStocks[model] = _filterStocks[model].filter(s => s !== sym);
+  renderFilterTags(model);
 }
 
-function renderStockTags(model) {
+function renderFilterTags(model) {
   const wrap = document.getElementById(model + '-stock-tags');
-  wrap.innerHTML = _stockLists[model].map(s =>
-    `<span class="stock-tag">${s}<button onclick="removeStock('${model}','${s}')">×</button></span>`
+  wrap.innerHTML = _filterStocks[model].map(s =>
+    `<span class="stock-tag">${s}<button onclick="removeFilterStock('${model}','${s}')">×</button></span>`
   ).join('');
 }
 
+async function loadUniverse() {
+  _universe = await fetch('/api/universe').then(r => r.json());
+  ['hm', 'ts', 'nse'].forEach(renderUniverse);
+}
+
+function renderUniverse(model) {
+  if (!_universe) return;
+  const {bot, type} = UNI_KEYS[model];
+  const section = _universe[bot] || {};
+  if (type === 'add_remove') {
+    renderChips(model + '-uni-add',    section.add    || [], model, 'add');
+    renderChips(model + '-uni-remove', section.remove || [], model, 'remove');
+  } else {
+    renderChips(model + '-uni-extra', section.extra || [], model, 'extra');
+  }
+}
+
+function renderChips(elId, items, model, listKey) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  el.innerHTML = items.length
+    ? items.map(s =>
+        `<span class="uni-chip">${s}<button onclick="removeUniverseStock('${model}','${listKey}','${s}')">&times;</button></span>`
+      ).join('')
+    : '<span class="text-muted text-sm">None</span>';
+}
+
+function addUniverseStockBtn(model, listKey) {
+  const input = document.getElementById(model + '-uni-' + listKey + '-input');
+  if (!input) return;
+  const sym = input.value.trim().toUpperCase();
+  if (!sym) return;
+  _addToUniverse(model, listKey, sym);
+  input.value = '';
+}
+
+function addUniverseStock(e, model, listKey) {
+  if (e.key !== 'Enter') return;
+  addUniverseStockBtn(model, listKey);
+}
+
+async function _addToUniverse(model, listKey, sym) {
+  if (!_universe) await loadUniverse();
+  const {bot} = UNI_KEYS[model];
+  _universe[bot] = _universe[bot] || {};
+  const arr = _universe[bot][listKey] || [];
+  if (!arr.includes(sym)) {
+    arr.push(sym);
+    _universe[bot][listKey] = arr;
+    await _saveUniverse();
+    renderUniverse(model);
+    toast(`${sym} added to ${bot} ${listKey}`, 'success');
+  }
+}
+
+async function removeUniverseStock(model, listKey, sym) {
+  if (!_universe) return;
+  const {bot} = UNI_KEYS[model];
+  _universe[bot] = _universe[bot] || {};
+  _universe[bot][listKey] = (_universe[bot][listKey] || []).filter(s => s !== sym);
+  await _saveUniverse();
+  renderUniverse(model);
+  toast(`${sym} removed from ${bot} ${listKey}`, 'warn');
+}
+
+async function _saveUniverse() {
+  await fetch('/api/universe', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(_universe),
+  });
+}
+
 async function runBacktest(model, sweep=false) {
-  const terminal  = document.getElementById('bt-terminal');
-  const progress  = document.getElementById('progress-wrap');
-  const resultsEl = document.getElementById('bt-results');
+  const terminal = document.getElementById('bt-terminal-' + model);
+  const progress = document.getElementById('progress-' + model);
   terminal.classList.remove('hidden');
-  terminal.textContent = `Starting ${model.toUpperCase()} backtest…\n`;
+  terminal.textContent = `Starting ${model.toUpperCase()} backtest...\n`;
   progress.style.display = 'block';
-  resultsEl.style.display = 'none';
-  document.getElementById(model+'-run').disabled = true;
-  document.getElementById(model+'-cancel').style.display = '';
+  document.getElementById('results-' + model).style.display = 'none';
+  document.getElementById(model + '-run').disabled = true;
+  document.getElementById(model + '-cancel').style.display = '';
+  setBadge(model, 'running');
 
   const flags = [];
   if (sweep) flags.push('--sweep');
@@ -224,92 +450,114 @@ async function runBacktest(model, sweep=false) {
 
   const body = {
     model,
-    stocks:  _stockLists[model],
+    stocks:  _filterStocks[model],
     start:   document.getElementById(model + '-start').value,
     capital: model !== 'nse' ? document.getElementById(model + '-capital').value : '',
     flags,
   };
 
-  const res = await fetch('/api/backtest/run', {
-    method: 'POST', headers: {'Content-Type':'application/json'},
+  const res  = await fetch('/api/backtest/run', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(body),
   });
   const data = await res.json();
   if (data.status !== 'started') {
     terminal.textContent += '\n' + (data.message || JSON.stringify(data));
-    document.getElementById(model+'-run').disabled = false;
-    document.getElementById(model+'-cancel').style.display = 'none';
-    if (data.status === 'warning') toast(data.message, 'warn');
+    document.getElementById(model + '-run').disabled = false;
+    document.getElementById(model + '-cancel').style.display = 'none';
+    setBadge(model, 'idle');
+    if (data.status === 'warning' || data.status === 'running') toast(data.message, 'warn');
   }
 }
 
-async function cancelBacktest() {
-  await fetch('/api/backtest/cancel', {method:'POST'});
-  toast('Backtest cancelled', 'warn');
+async function cancelBacktest(model) {
+  await fetch('/api/backtest/cancel', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({model}),
+  });
+  setBadge(model, 'idle');
+  document.getElementById(model + '-run').disabled = false;
+  document.getElementById(model + '-cancel').style.display = 'none';
+  document.getElementById('progress-' + model).style.display = 'none';
+  toast(`${model.toUpperCase()} backtest cancelled`, 'warn');
+}
+
+function setBadge(model, status) {
+  const badge = document.getElementById('badge-' + model);
+  if (!badge) return;
+  badge.textContent = status;
+  badge.className = 'bt-status-badge status-' + status;
 }
 
 socket.on('backtest_output', d => {
-  const terminal = document.getElementById('bt-terminal');
+  const terminal = document.getElementById('bt-terminal-' + d.model);
+  if (!terminal) return;
   terminal.textContent += d.line + '\n';
   terminal.scrollTop = terminal.scrollHeight;
 });
 
 socket.on('backtest_done', d => {
-  const model = _currentModel;
-  document.getElementById(model+'-run').disabled = false;
-  document.getElementById(model+'-cancel').style.display = 'none';
-  document.getElementById('progress-wrap').style.display = 'none';
-  const terminal = document.getElementById('bt-terminal');
-  terminal.textContent += `\n── Completed (exit ${d.returncode}) ──\n`;
+  const m = d.model;
+  document.getElementById(m + '-run').disabled = false;
+  document.getElementById(m + '-cancel').style.display = 'none';
+  document.getElementById('progress-' + m).style.display = 'none';
+  const terminal = document.getElementById('bt-terminal-' + m);
+  terminal.textContent += `\n-- Completed (exit ${d.returncode}) --\n`;
   terminal.scrollTop = terminal.scrollHeight;
   if (d.returncode === 0) {
-    toast('Backtest complete — loading results…', 'success');
-    loadResults();
+    setBadge(m, 'completed');
+    toast(`${m.toUpperCase()} backtest complete — loading results...`, 'success');
+    loadResults(m);
   } else {
-    toast('Backtest exited with errors', 'error');
+    setBadge(m, 'failed');
+    toast(`${m.toUpperCase()} backtest exited with errors`, 'error');
   }
 });
 
-async function loadResults() {
-  const res  = await fetch('/api/backtest/results/' + _currentModel);
+async function loadResults(model) {
+  const res  = await fetch('/api/backtest/results/' + model);
   const data = await res.json();
-  _allResults = data.per_stock || [];
+  _allResults[model] = data.per_stock || [];
   const a = data.analytics || {};
-  document.getElementById('bt-metrics').innerHTML = [
-    ['CAGR', a.cagr ? a.cagr + '%' : '—'],
-    ['Sharpe', a.sharpe || '—'],
-    ['Max DD', a.maxdd || '—'],
-    ['Trades', a.total_trades || 0],
-    ['Win Rate', a.win_rate ? a.win_rate + '%' : '—'],
+  document.getElementById('bt-metrics-' + model).innerHTML = [
+    ['CAGR',          a.cagr          ? a.cagr + '%'      : '—'],
+    ['Sharpe',        a.sharpe        || '—'],
+    ['Max DD',        a.maxdd         || '—'],
+    ['Trades',        a.total_trades  || 0],
+    ['Win Rate',      a.win_rate      ? a.win_rate + '%'  : '—'],
     ['Profit Factor', a.profit_factor || '—'],
-    ['Avg Hold', a.avg_hold ? a.avg_hold + 'd' : '—'],
-  ].map(([l,v]) => `<div class="bt-metric"><div class="bt-metric-label">${l}</div><div class="bt-metric-value">${v}</div></div>`).join('');
-  document.getElementById('bt-results').style.display = '';
-  renderResultsTable(_allResults);
+    ['Avg Hold',      a.avg_hold      ? a.avg_hold + 'd' : '—'],
+  ].map(([l, v]) =>
+    `<div class="bt-metric"><div class="bt-metric-label">${l}</div><div class="bt-metric-value">${v}</div></div>`
+  ).join('');
+  document.getElementById('results-' + model).style.display = '';
+  filterResults(model);
 }
 
-function filterResults() {
-  const minWR  = parseFloat(document.getElementById('res-min-wr').value) || 0;
-  const minTrd = parseInt(document.getElementById('res-min-trades').value) || 0;
-  renderResultsTable(_allResults.filter(r => r.win_rate >= minWR && r.trades >= minTrd));
+function filterResults(model) {
+  const minWR  = parseFloat(document.getElementById(model + '-min-wr').value)     || 0;
+  const minTrd = parseInt(document.getElementById(model + '-min-trades').value)   || 0;
+  const sym    = (document.getElementById(model + '-sym-search').value || '').toUpperCase();
+  const key    = document.getElementById(model + '-sort').value;
+  let rows = (_allResults[model] || []).filter(r =>
+    r.win_rate >= minWR && r.trades >= minTrd && (!sym || r.symbol.includes(sym))
+  );
+  rows.sort((a, b) => (b[key] || 0) - (a[key] || 0));
+  renderResultsTable(model, rows);
 }
 
-function sortResults() {
-  const key = document.getElementById('res-sort').value;
-  renderResultsTable([..._allResults].sort((a,b) => (b[key]||0) - (a[key]||0)));
-}
-
-function renderResultsTable(rows) {
-  const tbody = document.getElementById('results-body');
+function renderResultsTable(model, rows) {
+  const tbody = document.getElementById('results-body-' + model);
   if (!rows.length) { tbody.innerHTML = '<tr><td colspan="7" class="empty">No results</td></tr>'; return; }
   tbody.innerHTML = rows.map(r => {
     const isDrag = r.net_pnl < 0;
     return `<tr>
-      <td class="sym">${r.symbol} ${isDrag ? '<span class="drag-tag">◄ DRAG</span>' : ''}</td>
+      <td class="sym">${r.symbol}${isDrag ? ' <span class="drag-tag">DRAG</span>' : ''}</td>
       <td class="mono">${r.trades}</td>
       <td class="mono ${clsPnl(r.net_pnl)}">${fmtRs(r.net_pnl)}</td>
-      <td class="mono ${r.win_rate>=50?'pos':'neg'}">${r.win_rate}%</td>
-      <td class="mono ${clsPnl(r.avg_ret)}">${r.avg_ret>0?'+':''}${r.avg_ret}%</td>
+      <td class="mono ${r.win_rate >= 50 ? 'pos' : 'neg'}">${r.win_rate}%</td>
+      <td class="mono ${clsPnl(r.avg_ret)}">${r.avg_ret > 0 ? '+' : ''}${r.avg_ret}%</td>
       <td class="mono">${r.avg_hold}d</td>
       <td><button class="btn btn-sm" onclick="openAddModal('${r.symbol}')">+ Add to Bot</button></td>
     </tr>`;
@@ -327,13 +575,18 @@ function closeAddModal() {
 }
 async function confirmAddBot() {
   const bot = document.getElementById('add-bot-select').value;
-  const res  = await fetch('/api/universe').then(r=>r.json());
+  if (!_universe) await loadUniverse();
   if (bot === 'nse200') {
-    if (!res.nse200.extra.includes(_addSym)) res.nse200.extra.push(_addSym);
+    _universe.nse200 = _universe.nse200 || {extra: []};
+    _universe.nse200.extra = _universe.nse200.extra || [];
+    if (!_universe.nse200.extra.includes(_addSym)) _universe.nse200.extra.push(_addSym);
   } else {
-    if (!res[bot].add.includes(_addSym)) res[bot].add.push(_addSym);
+    _universe[bot] = _universe[bot] || {add: [], remove: []};
+    if (!_universe[bot].add.includes(_addSym)) _universe[bot].add.push(_addSym);
   }
-  await fetch('/api/universe', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(res)});
+  await _saveUniverse();
+  const uiModel = bot === 'nse200' ? 'nse' : (bot === 'triple_screen' ? 'ts' : 'hm');
+  renderUniverse(uiModel);
   closeAddModal();
   toast(`${_addSym} added to ${bot} universe`, 'success');
 }
@@ -341,4 +594,6 @@ async function confirmAddBot() {
 document.getElementById('addBotModal').addEventListener('click', e => {
   if (e.target === document.getElementById('addBotModal')) closeAddModal();
 });
+
+loadUniverse();
 {% endblock %}
