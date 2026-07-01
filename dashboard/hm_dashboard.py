@@ -152,12 +152,16 @@ def write_custom_universe(data: dict) -> None:
 # ──────────────────────────────────────────────────────────────
 # Market data
 # ──────────────────────────────────────────────────────────────
+def _base_symbol(symbol: str) -> str:
+    return symbol[:-3] if symbol.upper().endswith(".NS") else symbol
+
 def _get_ltps(symbols: list[str]) -> dict[str, float]:
     if not symbols:
         return {}
+    bases = [_base_symbol(s) for s in symbols]
     try:
         import yfinance as yf
-        tickers = [s + ".NS" for s in symbols]
+        tickers = [s + ".NS" for s in bases]
         if len(tickers) == 1:
             data = yf.download(tickers[0], period="1d", interval="1m",
                                progress=False, auto_adjust=True)
@@ -167,11 +171,12 @@ def _get_ltps(symbols: list[str]) -> dict[str, float]:
                            progress=False, auto_adjust=True)
         prices: dict[str, float] = {}
         close = data["Close"]
+        base_to_orig = dict(zip(bases, symbols))
         for col in close.columns:
             sym = str(col).replace(".NS", "")
             series = close[col].dropna()
             if not series.empty:
-                prices[sym] = round(float(series.iloc[-1]), 2)
+                prices[base_to_orig.get(sym, sym)] = round(float(series.iloc[-1]), 2)
         return prices
     except Exception:
         return {}
@@ -179,7 +184,7 @@ def _get_ltps(symbols: list[str]) -> dict[str, float]:
 def _get_sparkline(symbol: str) -> list[float]:
     try:
         import yfinance as yf
-        df = yf.download(symbol + ".NS", period="30d", interval="1d",
+        df = yf.download(_base_symbol(symbol) + ".NS", period="30d", interval="1d",
                          progress=False, auto_adjust=True)
         return [round(float(x), 2) for x in df["Close"].dropna().tolist()]
     except Exception:
