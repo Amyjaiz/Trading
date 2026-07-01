@@ -750,6 +750,63 @@ def api_universe_save():
     write_custom_universe(data)
     return jsonify({"status": "saved"})
 
+_UNIVERSE_ADD_LOCK    = Lock()
+_UNIVERSE_REMOVE_LOCK = Lock()
+
+@app.route("/api/universe/add", methods=["POST"])
+@login_required
+def api_universe_add():
+    data   = request.get_json(force=True)
+    bot    = str(data.get("bot", "")).lower()
+    symbol = str(data.get("symbol", "")).upper().strip()
+    if not symbol or not bot:
+        return jsonify({"status": "error", "message": "bot and symbol required"}), 400
+    with _UNIVERSE_ADD_LOCK:
+        uni = read_custom_universe()
+        if bot == "nse200":
+            arr = uni.setdefault("nse200", {}).setdefault("extra", [])
+        elif bot in ("hm", "triple_screen"):
+            arr = uni.setdefault(bot, {}).setdefault("add", [])
+        else:
+            return jsonify({"status": "error", "message": f"Unknown bot: {bot}"}), 400
+        if symbol in arr:
+            return jsonify({"status": "already_exists", "bot": bot, "symbol": symbol})
+        arr.append(symbol)
+        write_custom_universe(uni)
+    return jsonify({"status": "added", "bot": bot, "symbol": symbol})
+
+@app.route("/api/universe/remove", methods=["POST"])
+@login_required
+def api_universe_remove():
+    data   = request.get_json(force=True)
+    bot    = str(data.get("bot", "")).lower()
+    symbol = str(data.get("symbol", "")).upper().strip()
+    if not symbol or not bot:
+        return jsonify({"status": "error", "message": "bot and symbol required"}), 400
+    with _UNIVERSE_REMOVE_LOCK:
+        uni = read_custom_universe()
+        if bot == "nse200":
+            section = uni.setdefault("nse200", {"extra": []})
+            arr = section.setdefault("extra", [])
+            if symbol in arr:
+                arr.remove(symbol)
+            else:
+                return jsonify({"status": "error", "message": f"{symbol} not in nse200 universe"}), 404
+        elif bot in ("hm", "triple_screen"):
+            section    = uni.setdefault(bot, {"add": [], "remove": []})
+            add_arr    = section.setdefault("add", [])
+            remove_arr = section.setdefault("remove", [])
+            if symbol in add_arr:
+                add_arr.remove(symbol)
+            elif symbol in remove_arr:
+                remove_arr.remove(symbol)
+            else:
+                remove_arr.append(symbol)
+        else:
+            return jsonify({"status": "error", "message": f"Unknown bot: {bot}"}), 400
+        write_custom_universe(uni)
+    return jsonify({"status": "removed", "bot": bot, "symbol": symbol})
+
 # ──────────────────────────────────────────────────────────────
 # API — Trade history
 # ──────────────────────────────────────────────────────────────

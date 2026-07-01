@@ -575,20 +575,25 @@ function closeAddModal() {
 }
 async function confirmAddBot() {
   const bot = document.getElementById('add-bot-select').value;
-  if (!_universe) await loadUniverse();
-  if (bot === 'nse200') {
-    _universe.nse200 = _universe.nse200 || {extra: []};
-    _universe.nse200.extra = _universe.nse200.extra || [];
-    if (!_universe.nse200.extra.includes(_addSym)) _universe.nse200.extra.push(_addSym);
-  } else {
-    _universe[bot] = _universe[bot] || {add: [], remove: []};
-    if (!_universe[bot].add.includes(_addSym)) _universe[bot].add.push(_addSym);
-  }
-  await _saveUniverse();
-  const uiModel = bot === 'nse200' ? 'nse' : (bot === 'triple_screen' ? 'ts' : 'hm');
-  renderUniverse(uiModel);
   closeAddModal();
-  toast(`${_addSym} added to ${bot} universe`, 'success');
+  try {
+    const res  = await fetch('/api/universe/add', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({bot, symbol: _addSym}),
+    });
+    const data = await res.json();
+    if (data.status === 'added') {
+      toast(`${_addSym} added to ${bot}`, 'success');
+      await loadUniverse();
+    } else if (data.status === 'already_exists') {
+      toast(`${_addSym} already in ${bot} universe`, 'warn');
+    } else {
+      toast(`Error: ${data.message || data.status}`, 'error');
+    }
+  } catch(e) {
+    toast('Network error — try again', 'error');
+  }
 }
 
 document.getElementById('addBotModal').addEventListener('click', e => {

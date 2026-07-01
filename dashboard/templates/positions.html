@@ -77,6 +77,14 @@
 {% block scripts %}
 const sparkCharts = {};
 
+function wrBadge(wr) {
+  if (!wr || wr === '—') return '<span class="wr-badge">—</span>';
+  const m   = wr.match(/(\d+)%/);
+  const pct = m ? parseInt(m[1]) : null;
+  const cls = pct == null ? '' : pct > 60 ? 'wr-green' : pct >= 40 ? 'wr-amber' : 'wr-red';
+  return `<span class="wr-badge ${cls}">${wr}</span>`;
+}
+
 function makeSparklineCell(symbol) {
   const id = 'spark-' + symbol.replace(/[^a-z0-9]/gi, '');
   const cell = `<td class="sparkline-cell"><canvas id="${id}" width="100" height="36"></canvas></td>`;
@@ -137,7 +145,7 @@ function renderHm(positions) {
       <td class="mono ${clsPnl(pnl)}">${fmtRs(pnl)}</td>
       <td class="mono text-muted">₹${parseFloat(p.stop_px||0).toLocaleString('en-IN')}</td>
       <td class="mono">${daysSince}d</td>
-      <td class="wr-badge">${p.win_rate||'—'}</td>
+      <td>${wrBadge(p.win_rate)}</td>
       ${makeSparklineCell(p.symbol||'')}
       <td>
         <div class="flex gap-8">
@@ -175,7 +183,7 @@ function renderTs(positions) {
       <td class="mono ${clsPnl(pnl)}">${fmtRs(pnl)}</td>
       <td class="mono text-muted">₹${parseFloat(p.StopLoss||0).toLocaleString('en-IN')}</td>
       <td class="mono">${p.EntryDate||'—'}</td>
-      <td class="wr-badge">${p.win_rate||'—'}</td>
+      <td>${wrBadge(p.win_rate)}</td>
       ${makeSparklineCell(p.Symbol||'')}
       <td>
         <div class="flex gap-8">
@@ -214,7 +222,7 @@ function renderNse(positions) {
       <td class="mono ${clsPnl(pnl)}">${fmtRs(pnl)}</td>
       <td class="mono">${p.ml_weight||'—'}</td>
       <td class="mono">${p.date||'—'}</td>
-      <td class="wr-badge">${p.win_rate||'—'}</td>
+      <td>${wrBadge(p.win_rate)}</td>
       ${makeSparklineCell(p.ticker||'')}
       <td>
         <div class="flex gap-8">
