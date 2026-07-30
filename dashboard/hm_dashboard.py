@@ -252,11 +252,58 @@ PERIOD_DAYS: dict[str, int | None] = {
     "1w": 7, "1m": 30, "3m": 90, "6m": 180, "1y": 365, "all": None,
 }
 
+def _read_hm_live_trades() -> list[dict]:
+    """hm_live_bot.py logs entries/exits to live_trades.csv (real orders) or
+    paper_trades.csv (TRADING_ENABLED=False) — NOT hm_trades.csv, which is the
+    backtest script's output file and gets overwritten by every backtest run.
+    Both live/paper files share one header row but BUY and SELL rows populate
+    the same column positions with different meanings (e.g. col 7 is order_id
+    on a BUY row, pnl on a SELL row), so DictReader would misparse SELL rows.
+    Parse by position instead."""
+    path = None
+    for fname in ("live_trades.csv", "paper_trades.csv"):
+        candidate = os.path.join(HM_DIR, fname)
+        if os.path.exists(candidate):
+            path = candidate
+            break
+    if not path:
+        return []
+    rows: list[dict] = []
+    try:
+        with open(path, newline="", errors="replace") as f:
+            reader = csv.reader(f)
+            next(reader, None)  # header
+            for r in reader:
+                if len(r) < 12:
+                    continue
+                ts, action = r[0], r[1].upper()
+                if action == "SELL":
+                    price, entry_px, pnl, pnl_pct, held, reason = r[5], r[6], r[7], r[8], r[9], r[10]
+                else:
+                    price, entry_px, pnl, pnl_pct, held, reason = r[5], "", "0", "0", "0", r[11] if len(r) > 11 else ""
+                rows.append({
+                    "date":      ts[:10],
+                    "time":      ts[11:19] if len(ts) > 19 else "",
+                    "action":    action,
+                    "symbol":    r[2],
+                    "sector":    r[3],
+                    "qty":       r[4],
+                    "price":     price,
+                    "entry_px":  entry_px,
+                    "pnl":       pnl,
+                    "pnl_pct":   pnl_pct,
+                    "held_days": held,
+                    "reason":    reason,
+                    "model":     "HM",
+                })
+    except Exception:
+        pass
+    return rows
+
 def _all_trades(bot_filter: str = "all", period_days: int | None = None) -> list[dict]:
     sources = [
         ("TS",  os.path.join(TRIPLE_SCREEN_DIR, "ts_trades.csv")),
         ("MOM", os.path.join(NSE200_DIR,        "nse200_trades.csv")),
-        ("HM",  os.path.join(HM_DIR,            "hm_trades.csv")),
     ]
     cutoff = (datetime.now() - timedelta(days=period_days)).date() if period_days else None
     trades: list[dict] = []
@@ -271,6 +318,16 @@ def _all_trades(bot_filter: str = "all", period_days: int | None = None) -> list
                 except Exception:
                     pass
             row["_bot"] = tag
+            trades.append(row)
+    if bot_filter in ("all", "hm"):
+        for row in _read_hm_live_trades():
+            if cutoff:
+                try:
+                    if datetime.strptime(row.get("date", ""), "%Y-%m-%d").date() < cutoff:
+                        continue
+                except Exception:
+                    pass
+            row["_bot"] = "HM"
             trades.append(row)
     return trades
 
@@ -317,14 +374,19 @@ def _compute_analytics(trades: list[dict]) -> dict:
 def _win_rate_for_symbol(symbol: str) -> str:
     wins = losses = 0
     for path in [os.path.join(TRIPLE_SCREEN_DIR, "ts_trades.csv"),
-                 os.path.join(NSE200_DIR,        "nse200_trades.csv"),
-                 os.path.join(HM_DIR,            "hm_trades.csv")]:
+                 os.path.join(NSE200_DIR,        "nse200_trades.csv")]:
         for row in _read_csv_dicts(path):
             if row.get("symbol") == symbol and row.get("action", "").upper() in ("SELL", "EXIT"):
                 if float(row.get("pnl", 0) or 0) > 0:
                     wins += 1
                 else:
                     losses += 1
+    for row in _read_hm_live_trades():
+        if row.get("symbol") == symbol and row.get("action", "").upper() == "SELL":
+            if float(row.get("pnl", 0) or 0) > 0:
+                wins += 1
+            else:
+                losses += 1
     total = wins + losses
     if total == 0:
         return "—"
@@ -463,12 +525,15 @@ def api_overview():
     for tag, path in [
         ("TS",  os.path.join(TRIPLE_SCREEN_DIR, "ts_trades.csv")),
         ("MOM", os.path.join(NSE200_DIR,        "nse200_trades.csv")),
-        ("HM",  os.path.join(HM_DIR,            "hm_trades.csv")),
     ]:
         for row in _read_csv_dicts(path):
             if row.get("date", "") == today:
                 row["_bot"] = tag
                 today_trades.append(row)
+    for row in _read_hm_live_trades():
+        if row.get("date", "") == today:
+            row["_bot"] = "HM"
+            today_trades.append(row)
 
     all_trades   = _all_trades("all", None)
     realized     = _compute_analytics(all_trades)
