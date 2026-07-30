@@ -19,6 +19,16 @@
     <div class="kpi-sub">All open positions</div>
   </div>
   <div class="kpi-card">
+    <div class="kpi-label">Realised P&L (All-Time)</div>
+    <div class="kpi-value" id="kpi-realized">—</div>
+    <div class="kpi-sub" id="kpi-realized-sub">Closed trades</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Total P&L</div>
+    <div class="kpi-value" id="kpi-total-pnl">—</div>
+    <div class="kpi-sub">Realised + unrealised</div>
+  </div>
+  <div class="kpi-card">
     <div class="kpi-label">Open Positions</div>
     <div class="kpi-value accent" id="kpi-positions">—</div>
     <div class="kpi-sub">Across 3 bots</div>
@@ -81,6 +91,26 @@
     </table>
   </div>
 </div>
+
+<div class="card" style="margin-top:16px">
+  <div class="card-header">
+    <span class="card-title">Recent Closed Trades</span>
+    <a class="text-muted text-sm" href="/history">View full history &rarr;</a>
+  </div>
+  <div class="table-wrap">
+    <table id="recent-table">
+      <thead>
+        <tr>
+          <th>Bot</th><th>Date</th><th>Symbol</th>
+          <th>Qty</th><th>Exit Price</th><th>P&L</th><th>P&L%</th><th>Days</th>
+        </tr>
+      </thead>
+      <tbody id="recent-body">
+        <tr><td colspan="8" class="empty">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -95,6 +125,19 @@ async function loadOverview() {
     const upEl = document.getElementById('kpi-unreal');
     upEl.textContent = fmtRs(up);
     upEl.className = 'kpi-value ' + clsPnl(up);
+
+    const rp = d.realized_pnl || 0;
+    const rpEl = document.getElementById('kpi-realized');
+    rpEl.textContent = fmtRs(rp);
+    rpEl.className = 'kpi-value ' + clsPnl(rp);
+    document.getElementById('kpi-realized-sub').textContent =
+      `${d.realized_trades || 0} closed trades · ${d.realized_win_rate != null ? d.realized_win_rate + '% WR' : '—'}`;
+
+    const tp = d.total_pnl != null ? d.total_pnl : (up + rp);
+    const tpEl = document.getElementById('kpi-total-pnl');
+    tpEl.textContent = fmtRs(tp);
+    tpEl.className = 'kpi-value ' + clsPnl(tp);
+
     document.getElementById('kpi-positions').textContent = d.open_positions;
     const bots = d.bots || {};
     const activeCount = Object.values(bots).filter(b=>b.status==='active').length;
@@ -128,6 +171,27 @@ async function loadOverview() {
           <td class="mono">${t.qty||''}</td>
           <td class="mono">₹${parseFloat(t.price||0).toLocaleString('en-IN')}</td>
           <td class="mono ${clsPnl(pnl)}">${pnl ? fmtRs(pnl) : '—'}</td>
+        </tr>`;
+      }).join('');
+    }
+
+    const recentBody = document.getElementById('recent-body');
+    const recent = d.recent_trades || [];
+    if (recent.length === 0) {
+      recentBody.innerHTML = '<tr><td colspan="8" class="empty">No closed trades yet</td></tr>';
+    } else {
+      recentBody.innerHTML = recent.map(t => {
+        const pnl = parseFloat(t.pnl||0);
+        const bot = t._bot || '';
+        return `<tr>
+          <td><span class="tag tag-${bot.toLowerCase()}">${bot}</span></td>
+          <td class="mono text-muted">${t.date||''}</td>
+          <td class="sym">${t.symbol||''}</td>
+          <td class="mono">${t.qty||''}</td>
+          <td class="mono">₹${parseFloat(t.price||0).toLocaleString('en-IN')}</td>
+          <td class="mono ${clsPnl(pnl)}">${fmtRs(pnl)}</td>
+          <td class="mono ${clsPnl(pnl)}">${t.pnl_pct ? fmtPct(parseFloat(t.pnl_pct)) : '—'}</td>
+          <td class="mono">${t.held_days || '—'}d</td>
         </tr>`;
       }).join('');
     }

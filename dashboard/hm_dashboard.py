@@ -470,16 +470,29 @@ def api_overview():
                 row["_bot"] = tag
                 today_trades.append(row)
 
+    all_trades   = _all_trades("all", None)
+    realized     = _compute_analytics(all_trades)
+    realized_pnl = realized["total_pnl"]
+
+    recent_sells = [t for t in all_trades if t.get("action", "").upper() in ("SELL", "EXIT")]
+    recent_sells.sort(key=lambda t: t.get("date", ""), reverse=True)
+    recent_trades = recent_sells[:15]
+
     return jsonify({
-        "available_cash":  _get_angel_balance(),
-        "unrealised_pnl":  round(unreal, 2),
+        "available_cash":     _get_angel_balance(),
+        "unrealised_pnl":     round(unreal, 2),
+        "realized_pnl":       realized_pnl,
+        "total_pnl":          round(unreal + realized_pnl, 2),
+        "realized_win_rate":  realized["win_rate"],
+        "realized_trades":    realized["total_trades"],
         "open_positions":  len(hm_pos) + len(ts_pos) + len(nse_pos),
         "bots": {
             "ts":  bot_health(TRIPLE_SCREEN_DIR, "Triple Screen"),
             "mom": bot_health(NSE200_DIR,        "NSE200 Momentum"),
             "hm":  bot_health(HM_DIR,            "Hilega Milega"),
         },
-        "today_trades": today_trades,
+        "today_trades":  today_trades,
+        "recent_trades": recent_trades,
     })
 
 # ──────────────────────────────────────────────────────────────
