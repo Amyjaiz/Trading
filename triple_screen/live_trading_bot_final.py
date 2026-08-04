@@ -57,7 +57,7 @@ MIN_PRICE             = 50.0       # skip stocks below Rs50
 # Nifty regime filter — blocks all entries when Nifty < SMA (bear market)
 # True  = respect backtest rule (recommended for live trading)
 # False = scan and trade regardless of Nifty regime (paper mode / testing)
-NIFTY_REGIME_FILTER   = True
+NIFTY_REGIME_FILTER   = False
 
 # Nifty SMA period — 200 is the backtest default
 # Shorter (100/150) = less restrictive, exits bear regime sooner
@@ -68,7 +68,7 @@ NIFTY_SMA_PERIOD      = 200
 # ML signal filter — blocks low-probability signals
 # True  = use ML classifier (recommended — AUC 0.6094, Sharpe 1.27)
 # False = take every Triple Screen signal without ML filter
-ML_FILTER_ENABLED     = True
+ML_FILTER_ENABLED     = False
 ML_FILTER_THRESHOLD   = 0.45      # reject signals below this probability
 SL_CHECK_INTERVAL     = 30         # live mode: check SL every 30 seconds
 TRAIL_INTERVAL        = 300        # live mode: update trailing stop every 5 min
