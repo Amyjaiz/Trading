@@ -21,10 +21,12 @@
           <label>Password</label>
           <input type="password" name="password" autocomplete="current-password" required autofocus>
         </div>
+        {% if login_totp_required %}
         <div class="form-field">
           <label>Google Authenticator Code</label>
           <input type="text" name="totp" maxlength="6" placeholder="000000" inputmode="numeric" autocomplete="one-time-code" required>
         </div>
+        {% endif %}
         <button type="submit" class="login-submit">Sign In</button>
       </form>
     </div>

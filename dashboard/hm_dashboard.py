@@ -32,6 +32,9 @@ ORDER_LOG_FILE       = os.path.join(DASHBOARD_DIR, "order_log.csv")
 
 TRADING_ENABLED      = False       # flip to True to send live orders
 MAX_ORDER_VALUE      = 25_000      # hard cap per order in ₹
+LOGIN_TOTP_REQUIRED  = False       # TEMP: dashboard login TOTP disabled — password only.
+                                    # Does NOT affect order placement, which always re-verifies
+                                    # TOTP via _verify_totp() in api_order() regardless of this flag.
 
 # Angel One credentials (hardcoded per Aman's preference — fill these in)
 ANGEL_API_KEY        = "your_api_key"
@@ -425,14 +428,15 @@ def login_page():
         else:
             time.sleep(1)   # brute-force protection
             pw_ok   = check_password_hash(auth.get("pw_hash", "x"), pw)
-            totp_ok = pyotp.TOTP(auth.get("totp_secret", "x")).verify(totp, valid_window=1)
+            totp_ok = True if not LOGIN_TOTP_REQUIRED else \
+                pyotp.TOTP(auth.get("totp_secret", "x")).verify(totp, valid_window=1)
             if pw_ok and totp_ok:
                 session.clear()
                 session["authenticated"] = True
                 session["last_active"]   = time.time()
                 return redirect(url_for("overview"))
             error = "Invalid password or authenticator code."
-    return render_template("login.html", error=error)
+    return render_template("login.html", error=error, login_totp_required=LOGIN_TOTP_REQUIRED)
 
 @app.route("/logout")
 def logout():
