@@ -374,6 +374,48 @@ def _compute_analytics(trades: list[dict]) -> dict:
         "worst_trade": {"symbol": worst.get("symbol"), "pct": worst.get("pnl_pct")},
     }
 
+def _pair_round_trips(trades: list[dict]) -> list[dict]:
+    """Pair each SELL/EXIT row with its FIFO-matching BUY row (per bot+symbol)
+    into one row per completed round trip, so History shows entry and exit
+    together instead of as two separate rows at different times."""
+    groups: dict[tuple, list[dict]] = {}
+    for t in trades:
+        groups.setdefault((t.get("_bot", ""), t.get("symbol", "")), []).append(t)
+
+    closed: list[dict] = []
+    for (bot, symbol), rows in groups.items():
+        rows.sort(key=lambda t: (t.get("date", ""), t.get("time", "")))
+        pending: list[dict] = []
+        for t in rows:
+            action = (t.get("action") or "").upper()
+            if action == "BUY":
+                pending.append(t)
+            elif action in ("SELL", "EXIT"):
+                entry = pending.pop(0) if pending else None
+                try:
+                    pnl = float(t.get("pnl", 0) or 0)
+                except Exception:
+                    pnl = 0.0
+                closed.append({
+                    "_bot":       bot,
+                    "symbol":     symbol,
+                    "entry_date": entry.get("date") if entry else None,
+                    "entry_time": entry.get("time") if entry else None,
+                    "exit_date":  t.get("date"),
+                    "exit_time":  t.get("time"),
+                    "date":       t.get("date"),   # for _compute_analytics compatibility
+                    "action":     "SELL",
+                    "qty":        t.get("qty"),
+                    "buy_price":  (entry.get("price") if entry else None) or t.get("entry_px"),
+                    "sell_price": t.get("price"),
+                    "pnl":        pnl,
+                    "pnl_pct":    t.get("pnl_pct"),
+                    "held_days":  t.get("held_days"),
+                    "reason":     t.get("reason"),
+                })
+    closed.sort(key=lambda t: (t.get("exit_date") or "", t.get("exit_time") or ""), reverse=True)
+    return closed
+
 def _win_rate_for_symbol(symbol: str) -> str:
     wins = losses = 0
     for path in [os.path.join(TRIPLE_SCREEN_DIR, "ts_trades.csv"),
@@ -902,28 +944,39 @@ def api_universe_remove():
 def api_history():
     bot    = request.args.get("bot",    "all").lower()
     period = request.args.get("period", "all").lower()
-    action = request.args.get("action", "all").lower()
     result = request.args.get("result", "all").lower()
     search = request.args.get("search", "").upper()
     page   = max(1, int(request.args.get("page", 1)))
 
-    trades = _all_trades(bot, PERIOD_DAYS.get(period))
+    # Pair on the FULL unfiltered history first, so a trade's entry is still
+    # matched even if it falls outside the selected period window — then
+    # filter the resulting closed trades by exit date.
+    all_trades = _all_trades(bot, None)
+    closed = _pair_round_trips(all_trades)
 
-    if action != "all":
-        trades = [t for t in trades if t.get("action", "").lower() == action]
+    period_days = PERIOD_DAYS.get(period)
+    if period_days:
+        cutoff = (datetime.now() - timedelta(days=period_days)).date()
+        def _in_period(t: dict) -> bool:
+            try:
+                return datetime.strptime(t.get("exit_date") or "", "%Y-%m-%d").date() >= cutoff
+            except Exception:
+                return False
+        closed = [t for t in closed if _in_period(t)]
+
     if result == "win":
-        trades = [t for t in trades if float(t.get("pnl", 0) or 0) > 0]
+        closed = [t for t in closed if float(t.get("pnl", 0) or 0) > 0]
     elif result == "loss":
-        trades = [t for t in trades if float(t.get("pnl", 0) or 0) <= 0]
+        closed = [t for t in closed if float(t.get("pnl", 0) or 0) <= 0]
     elif result == "stop":
-        trades = [t for t in trades if "stop" in (t.get("reason") or "").lower()]
+        closed = [t for t in closed if "stop" in (t.get("reason") or "").lower()]
     if search:
-        trades = [t for t in trades if search in t.get("symbol", "").upper()]
+        closed = [t for t in closed if search in (t.get("symbol") or "").upper()]
 
-    analytics = _compute_analytics(trades)
+    analytics = _compute_analytics(closed)
 
     per_stock: dict[str, dict] = {}
-    for t in trades:
+    for t in closed:
         sym = t.get("symbol", "")
         if not sym:
             continue
@@ -940,8 +993,8 @@ def api_history():
     ]
 
     per_page = 50
-    total    = len(trades)
-    page_trades = trades[(page - 1) * per_page: page * per_page]
+    total    = len(closed)
+    page_trades = closed[(page - 1) * per_page: page * per_page]
 
     return jsonify({
         "analytics":  analytics,

@@ -23,12 +23,6 @@
     <button class="period-btn" data-period="6m"  onclick="setPeriod(this,'6m')">6M</button>
     <button class="period-btn" data-period="1y"  onclick="setPeriod(this,'1y')">1Y</button>
     <button class="period-btn active" data-period="all" onclick="setPeriod(this,'all')">All</button>
-    <span class="filter-label">Action:</span>
-    <select id="f-action" onchange="loadHistory()">
-      <option value="all">All</option>
-      <option value="buy">BUY</option>
-      <option value="sell">SELL</option>
-    </select>
     <span class="filter-label">Result:</span>
     <select id="f-result" onchange="loadHistory()">
       <option value="all">All</option>
@@ -65,16 +59,16 @@
 
 <div class="card">
   <div class="card-header">
-    <span class="card-title">Full Trade Log</span>
+    <span class="card-title">Closed Trades</span>
     <span class="text-muted text-sm" id="trade-count"></span>
   </div>
   <div class="table-wrap">
     <table>
       <thead>
         <tr>
-          <th>Date</th><th>Bot</th><th>Symbol</th><th>Action</th>
-          <th>Qty</th><th>Price</th><th>Entry</th><th>P&L</th><th>P&L%</th>
-          <th>Days</th><th>Reason</th>
+          <th>Bot</th><th>Symbol</th><th>Buy Date</th><th>Sell Date</th>
+          <th>Qty</th><th>Buy Price</th><th>Sell Price</th><th>P&L</th><th>P&L%</th>
+          <th>Days Held</th><th>Reason</th>
         </tr>
       </thead>
       <tbody id="trades-body"></tbody>
@@ -100,7 +94,6 @@ function buildParams() {
   return new URLSearchParams({
     bot:    document.getElementById('f-bot').value,
     period: _currentPeriod,
-    action: document.getElementById('f-action').value,
     result: document.getElementById('f-result').value,
     search: document.getElementById('f-search').value.trim(),
     page:   _currentPage,
@@ -157,13 +150,13 @@ function renderTrades(trades) {
     const pnl = parseFloat(t.pnl||0);
     const bot = t._bot || '';
     return `<tr>
-      <td class="mono">${t.date||''}</td>
       <td><span class="tag tag-${bot.toLowerCase()}">${bot}</span></td>
       <td class="sym">${t.symbol||''}</td>
-      <td>${t.action||''}</td>
+      <td class="mono">${t.entry_date||'—'}</td>
+      <td class="mono">${t.exit_date||''}</td>
       <td class="mono">${t.qty||''}</td>
-      <td class="mono">₹${parseFloat(t.price||0).toLocaleString('en-IN')}</td>
-      <td class="mono">₹${parseFloat(t.entry_px||0).toLocaleString('en-IN')}</td>
+      <td class="mono">₹${parseFloat(t.buy_price||0).toLocaleString('en-IN')}</td>
+      <td class="mono">₹${parseFloat(t.sell_price||0).toLocaleString('en-IN')}</td>
       <td class="mono ${clsPnl(pnl)}">${pnl ? fmtRs(pnl) : '—'}</td>
       <td class="mono ${clsPnl(pnl)}">${t.pnl_pct ? fmtPct(parseFloat(t.pnl_pct)) : '—'}</td>
       <td class="mono">${t.held_days||'—'}d</td>
