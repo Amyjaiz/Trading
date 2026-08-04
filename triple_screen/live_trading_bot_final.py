@@ -4,10 +4,10 @@ Merged: Old bot style (runs anytime, emoji reports, full scan) +
         New bot power (real-time SL every 30s, live orders, token map, real margin)
 
 RUN ANYTIME for a full report + signal scan (paper mode, no real orders):
-    python live_trading_bot.py
+    python live_trading_bot_final.py
 
 RUN LIVE during market hours (9:15-3:25, real orders):
-    python live_trading_bot.py --live
+    python live_trading_bot_final.py --live
 
 INSTALL:
     pip install smartapi-python pyotp yfinance pandas numpy requests
