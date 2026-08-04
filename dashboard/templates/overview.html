@@ -51,6 +51,7 @@
       <span class="bot-name">Triple Screen</span>
       <span class="status-dot offline" id="dot-ts"></span>
     </div>
+    <div id="ts-filter-badges"></div>
     <div class="bot-lag" id="lag-ts">—</div>
     <div class="bot-log" id="log-ts">loading…</div>
   </div>
@@ -116,6 +117,12 @@
 {% block scripts %}
 document.getElementById('today-date').textContent = new Date().toLocaleDateString('en-IN', {weekday:'long',year:'numeric',month:'long',day:'numeric'});
 
+function filterBadge(label, value) {
+  const cls  = value === true ? 'on' : value === false ? 'off' : 'unknown';
+  const text = value === true ? 'ON' : value === false ? 'OFF' : '—';
+  return `<span class="filter-badge ${cls}">${label}: ${text}</span>`;
+}
+
 async function loadOverview() {
   try {
     const d = await fetch('/api/overview').then(r=>r.json());
@@ -153,6 +160,13 @@ async function loadOverview() {
       const lag = bot.lag_s;
       lagEl.textContent = lag != null ? `⟳ ${lag < 60 ? lag+'s' : Math.round(lag/60)+'m'} ago` : 'No log found';
       logEl.textContent = (bot.last_lines || []).join('\n') || '—';
+
+      if (key === 'ts') {
+        const badgeEl = document.getElementById('ts-filter-badges');
+        if (badgeEl) badgeEl.innerHTML =
+          filterBadge('Nifty Filter', bot.nifty_regime_filter) +
+          filterBadge('ML Filter',    bot.ml_filter_enabled);
+      }
     }
 
     const tbody = document.getElementById('today-body');

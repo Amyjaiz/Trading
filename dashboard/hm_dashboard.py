@@ -5,6 +5,7 @@ import csv
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -101,6 +102,26 @@ def _read_csv_dicts(path: str) -> list[dict]:
             return list(csv.DictReader(f))
     except Exception:
         return []
+
+def _read_ts_filter_config() -> dict:
+    """Reads the NIFTY_REGIME_FILTER / ML_FILTER_ENABLED toggles straight out
+    of live_trading_bot_final.py's source — these are plain constants set at
+    the top of the script, not written to any state file, so parse them
+    directly rather than requiring the bot to export a status file."""
+    path = os.path.join(TRIPLE_SCREEN_DIR, "live_trading_bot_final.py")
+    result = {"nifty_regime_filter": None, "ml_filter_enabled": None}
+    try:
+        with open(path, errors="replace") as f:
+            src = f.read()
+        m = re.search(r"^NIFTY_REGIME_FILTER\s*=\s*(True|False)", src, re.MULTILINE)
+        if m:
+            result["nifty_regime_filter"] = m.group(1) == "True"
+        m = re.search(r"^ML_FILTER_ENABLED\s*=\s*(True|False)", src, re.MULTILINE)
+        if m:
+            result["ml_filter_enabled"] = m.group(1) == "True"
+    except Exception:
+        pass
+    return result
 
 def _bot_log_tail(bot_dir: str, n: int = 50) -> tuple[list[str], float]:
     log_path = os.path.join(bot_dir, "bot.log")
@@ -598,7 +619,7 @@ def api_overview():
         "realized_trades":    realized["total_trades"],
         "open_positions":  len(hm_pos) + len(ts_pos) + len(nse_pos),
         "bots": {
-            "ts":  bot_health(TRIPLE_SCREEN_DIR, "Triple Screen"),
+            "ts":  {**bot_health(TRIPLE_SCREEN_DIR, "Triple Screen"), **_read_ts_filter_config()},
             "mom": bot_health(NSE200_DIR,        "NSE200 Momentum"),
             "hm":  bot_health(HM_DIR,            "Hilega Milega"),
         },
