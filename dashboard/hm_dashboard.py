@@ -767,8 +767,8 @@ def api_backtest_status():
 def api_backtest_results(model: str):
     csv_map = {
         "hm":  os.path.join(HM_DIR,            "hm_trades.csv"),
-        "ts":  os.path.join(TRIPLE_SCREEN_DIR, "ts_trades.csv"),
-        "nse": os.path.join(NSE200_DIR,        "nse200_trades.csv"),
+        "ts":  os.path.join(TRIPLE_SCREEN_DIR, "ts_backtest_trades.csv"),
+        "nse": os.path.join(NSE200_DIR,        "nse200_backtest_trades.csv"),
     }
     path = csv_map.get(model.lower())
     if not path:

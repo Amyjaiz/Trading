@@ -23,8 +23,10 @@ COMMANDS:
   python nse200_backtest.py --refresh-universe       # force fresh NSE fetch
 
 OUTPUT FILES:
-  nse200_trades.csv     — standard trade log (dashboard reads this)
-  nifty200_cache.csv    — universe cache (shared with live scanner)
+  nse200_backtest_trades.csv  — standard trade log (dashboard reads this for backtest results only —
+                                 NOT the same file the live scanner writes to, so running a backtest
+                                 never overwrites live trading history)
+  nifty200_cache.csv          — universe cache (shared with live scanner)
 ================================================================================
 """
 
@@ -59,7 +61,7 @@ CFG = dict(
     NIFTY_TICKER    = "^NSEI",
     CACHE_FILE      = "nifty200_cache.csv",
     CACHE_DAYS      = 90,
-    TRADE_CSV       = "nse200_trades.csv",
+    TRADE_CSV       = "nse200_backtest_trades.csv",   # NOT nse200_trades.csv — that's the live scanner's file
 )
 
 # ============================================================================

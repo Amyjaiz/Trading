@@ -9,6 +9,7 @@ hm/bot.log
 hm/hm_signal_clf.pkl
 
 nse200/nse200_trades.csv
+nse200/nse200_backtest_trades.csv
 nse200/nse200_signal_log.csv
 nse200/nse200_metrics.json
 nse200/nifty200_cache.csv
@@ -16,6 +17,7 @@ nse200/bot.log
 
 triple_screen/open_positions.csv
 triple_screen/ts_trades.csv
+triple_screen/ts_backtest_trades.csv
 triple_screen/trade_journal.csv
 triple_screen/angel_tokens.json
 triple_screen/bot.log

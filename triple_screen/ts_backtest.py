@@ -22,7 +22,9 @@ COMMANDS:
   python ts_backtest.py --notrigger                       # ignore per-stock triggers, use all three
 
 OUTPUT:
-  ts_trades.csv    — standard trade log (dashboard reads this)
+  ts_backtest_trades.csv    — standard trade log (dashboard reads this for backtest results only —
+                              NOT the same file the live bot writes to, so running a backtest never
+                              overwrites live trading history)
 ================================================================================
 """
 
@@ -51,7 +53,7 @@ CFG = dict(
     MAX_POS     = 7,                # max concurrent positions
     MAX_NEW_DAY = 3,                # max new entries per day
     MIN_PRICE   = 50.0,             # skip stocks below Rs50
-    TRADE_CSV   = "ts_trades.csv",
+    TRADE_CSV   = "ts_backtest_trades.csv",   # NOT ts_trades.csv — that's the live bot's file
 )
 
 # ============================================================================
